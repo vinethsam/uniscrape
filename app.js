@@ -10,10 +10,10 @@ const GEMINI_MODEL  = "gemini-2.0-flash";
 const GEMINI_URL    = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const MAX_HTML_CHARS = 120000;
 
-const CORS_PROXIES = [
-  url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-];
+// IMPORTANT: After deploying worker.js to Cloudflare, paste your
+// worker URL here. It will look like:
+// https://uniscrape-proxy.YOUR-SUBDOMAIN.workers.dev
+const WORKER_URL = "https://uniscrape-proxy.itsvineth05.workers.dev/";
 
 // ---- State ------------------------------------------------------
 let allPrograms = [];
@@ -100,22 +100,34 @@ async function runScrape() {
   scrapeBtn.disabled = false;
 }
 
-// ---- Fetch via CORS proxy ---------------------------------------
+// ---- Fetch via Cloudflare Worker --------------------------------
 async function fetchWithProxy(url) {
-  let lastErr;
-  for (const buildProxy of CORS_PROXIES) {
-    try {
-      const res = await fetch(buildProxy(url), { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
-      const raw  = data.contents ?? data;
-      if (typeof raw !== "string") throw new Error("Unexpected proxy response");
-      return raw;
-    } catch (e) {
-      lastErr = e;
-    }
+  if (!WORKER_URL || WORKER_URL === "YOUR_WORKER_URL_HERE") {
+    throw new Error(
+      "Worker URL not set. Open app.js and paste your Cloudflare Worker URL into the WORKER_URL variable at the top of the file."
+    );
   }
-  throw lastErr ?? new Error("All proxies failed");
+
+  const proxyUrl = `${WORKER_URL.replace(/\/$/, "")}?url=${encodeURIComponent(url)}`;
+
+  let res;
+  try {
+    res = await fetch(proxyUrl, { signal: AbortSignal.timeout(25000) });
+  } catch (e) {
+    throw new Error("Could not reach the proxy worker: " + e.message);
+  }
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(data?.error ?? "Worker returned HTTP " + res.status);
+  }
+
+  if (!data?.contents || typeof data.contents !== "string") {
+    throw new Error("Unexpected response from worker.");
+  }
+
+  return data.contents;
 }
 
 // ---- Gemini extraction ------------------------------------------
