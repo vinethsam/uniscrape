@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UniScrape - Program Finder</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <span class="site-title">UniScrape</span>
+      <span class="site-sub">University Program Finder</span>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Input Panel -->
+    <section class="panel">
+      <div class="field-group">
+        <label class="field-label">University Programs Page URL</label>
+        <div class="input-row">
+          <input
+            type="url"
+            id="urlInput"
+            class="text-input"
+            placeholder="https://www.university.ac.uk/study/programmes"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="scrapeBtn" class="primary-btn">Extract Programs</button>
+        </div>
+        <p class="field-hint">Paste the link to a university's full course or programme listing page.</p>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">
+          Gemini API Key
+          <span class="field-note">- stored in your browser only, never sent anywhere else</span>
+        </label>
+        <input
+          type="password"
+          id="apiKeyInput"
+          class="text-input api-input"
+          placeholder="AIza..."
+          autocomplete="off"
+        />
+        <p class="field-hint">
+          Get a free key at
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>
+          - no credit card required.
+        </p>
+      </div>
+    </section>
+
+    <!-- Status -->
+    <section id="statusSection" class="panel status-panel hidden">
+      <div class="status-row">
+        <span class="spinner"></span>
+        <span id="statusText">Working...</span>
+      </div>
+      <div class="progress-track">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </section>
+
+    <!-- Error -->
+    <section id="errorSection" class="hidden">
+      <div class="error-box">
+        <span class="error-label">ERROR</span>
+        <span id="errorText"></span>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="resultsSection" class="hidden">
+
+      <div class="results-header">
+        <div class="results-meta">
+          <span id="resultCount" class="count-num">0</span>
+          <span class="count-label">programs found from</span>
+          <span id="sourcePill" class="source-tag"></span>
+        </div>
+        <div class="results-actions">
+          <button id="exportBtn" class="secondary-btn">Export CSV</button>
+          <button id="clearBtn" class="ghost-btn">Clear</button>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="filter-bar">
+        <input type="text" id="filterName"  class="filter-input" placeholder="Filter by name..." />
+        <select id="filterLevel" class="filter-select">
+          <option value="">All levels</option>
+          <option>Bachelor's</option>
+          <option>Master's</option>
+          <option>PhD / Doctorate</option>
+          <option>Foundation</option>
+          <option>Certificate / Diploma</option>
+          <option>Other</option>
+        </select>
+        <select id="filterBroad" class="filter-select">
+          <option value="">All subject areas</option>
+          <option>Arts & Humanities</option>
+          <option>Engineering & Technology</option>
+          <option>Life Sciences & Medicine</option>
+          <option>Multidisciplinary</option>
+          <option>Natural Sciences</option>
+          <option>Social Sciences & Management</option>
+        </select>
+        <select id="filterMode" class="filter-select">
+          <option value="">All modes</option>
+          <option>On-campus</option>
+          <option>Online</option>
+          <option>Blended</option>
+        </select>
+        <input type="text" id="filterDept" class="filter-input" placeholder="Filter by department..." />
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table id="programTable">
+          <thead>
+            <tr>
+              <th data-col="name">Program Name <span class="sort-icon">↕</span></th>
+              <th data-col="level">Level <span class="sort-icon">↕</span></th>
+              <th data-col="department">Department <span class="sort-icon">↕</span></th>
+              <th data-col="broad_subject">Subject Area <span class="sort-icon">↕</span></th>
+              <th data-col="narrow_subject">Narrow Subject <span class="sort-icon">↕</span></th>
+              <th data-col="mode">Mode <span class="sort-icon">↕</span></th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+
+      <div id="noResults" class="no-results hidden">No programs match your filters.</div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>Data sourced exclusively from official university websites. UniScrape v1.0</p>
+  </footer>
+
+  <script src="subject_mapping.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
