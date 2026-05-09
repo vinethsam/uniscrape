@@ -1,7 +1,7 @@
 # UniScrape - University Program Finder
 
 A browser-based tool that extracts academic program listings from official university websites.
-No server needed - runs entirely on GitHub Pages.
+No server needed - runs entirely on GitHub Pages https://vinethsam.github.io/uniscrape/
 
 ---
 
