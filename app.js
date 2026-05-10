@@ -66,9 +66,9 @@ apiKeyInput.addEventListener("change", () => {
 
 function updateHint() {
   if (apiProvider.value === "anthropic") {
-    apiHint.innerHTML = 'Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a> - add $5 credit to get started.';
+    apiHint.innerHTML = 'Get a key at - <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>';
   } else {
-    apiHint.innerHTML = 'Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a> - no credit card required.';
+    apiHint.innerHTML = 'Get a key at - <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>';
   }
 }
 
