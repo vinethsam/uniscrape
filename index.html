@@ -34,26 +34,33 @@
           />
           <button id="scrapeBtn" class="primary-btn">Extract Programs</button>
         </div>
-        <p class="field-hint">Paste the link to a university's full course or programme listing page.</p>
+        <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
 
-      <div class="field-group">
-        <label class="field-label">
-          Gemini API Key
-          <span class="field-note">- stored in your browser only, never sent anywhere else</span>
-        </label>
-        <input
-          type="password"
-          id="apiKeyInput"
-          class="text-input api-input"
-          placeholder="AIza..."
-          autocomplete="off"
-        />
-        <p class="field-hint">
-          Get a free key at
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>
-          - no credit card required.
-        </p>
+      <div class="two-col">
+        <div class="field-group">
+          <label class="field-label">API Provider</label>
+          <select id="apiProvider" class="text-input">
+            <option value="anthropic">Anthropic (Recommended)</option>
+            <option value="gemini">Google Gemini</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">
+            API Key
+            <span class="field-note">- saved in your browser only</span>
+          </label>
+          <input
+            type="password"
+            id="apiKeyInput"
+            class="text-input"
+            placeholder="Paste your API key here..."
+            autocomplete="off"
+          />
+          <p class="field-hint" id="apiHint">
+            Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>
+          </p>
+        </div>
       </div>
     </section>
 
@@ -93,7 +100,7 @@
 
       <!-- Filters -->
       <div class="filter-bar">
-        <input type="text" id="filterName"  class="filter-input" placeholder="Filter by name..." />
+        <input type="text" id="filterName"  class="filter-input" placeholder="Search programs..." />
         <select id="filterLevel" class="filter-select">
           <option value="">All levels</option>
           <option>Bachelor's</option>
@@ -118,6 +125,11 @@
           <option>Online</option>
           <option>Blended</option>
         </select>
+        <select id="filterScholarship" class="filter-select">
+          <option value="">Scholarships - any</option>
+          <option value="Yes">Scholarships available</option>
+          <option value="No">No scholarships listed</option>
+        </select>
         <input type="text" id="filterDept" class="filter-input" placeholder="Filter by department..." />
       </div>
 
@@ -126,12 +138,16 @@
         <table id="programTable">
           <thead>
             <tr>
+              <th class="col-num">#</th>
               <th data-col="name">Program Name <span class="sort-icon">↕</span></th>
               <th data-col="level">Level <span class="sort-icon">↕</span></th>
               <th data-col="department">Department <span class="sort-icon">↕</span></th>
               <th data-col="broad_subject">Subject Area <span class="sort-icon">↕</span></th>
-              <th data-col="narrow_subject">Narrow Subject <span class="sort-icon">↕</span></th>
               <th data-col="mode">Mode <span class="sort-icon">↕</span></th>
+              <th data-col="start_date">Start Date <span class="sort-icon">↕</span></th>
+              <th data-col="tuition_fee">Tuition Fee <span class="sort-icon">↕</span></th>
+              <th data-col="scholarship">Scholarship <span class="sort-icon">↕</span></th>
+              <th>Details</th>
               <th>Link</th>
             </tr>
           </thead>
@@ -142,10 +158,21 @@
       <div id="noResults" class="no-results hidden">No programs match your filters.</div>
     </section>
 
+    <!-- Expanded Row Modal -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <span id="modalTitle" class="modal-title"></span>
+          <button id="modalClose" class="modal-close">x</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+      </div>
+    </div>
+
   </main>
 
   <footer>
-    <p>Data sourced exclusively from official university websites. UniScrape v1.0</p>
+    <p>Data sourced exclusively from official university websites. UniScrape v2.0</p>
   </footer>
 
   <script src="subject_mapping.js"></script>
