@@ -1,26 +1,23 @@
-/* ---------------------------------------------------------------
-   UniScrape v2.0 - app.js
+/*
+   UniScrape v2.1 - app.js
    Supports both Anthropic and Google Gemini APIs.
    Extracts programs from university pages via Cloudflare Worker proxy.
----------------------------------------------------------------- */
+ */
 
-// ---- Config -----------------------------------------------------
+// Config
 const MAX_HTML_CHARS = 120000;
-
-// IMPORTANT: Paste your Cloudflare Worker URL here.
-// It looks like: https://uniscrape-proxy.yourname.workers.dev
-const WORKER_URL = "YOUR_WORKER_URL_HERE";
+const WORKER_URL = "https://uniscrape-proxy.itsvineth05.workers.dev/";
 
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const GEMINI_MODEL    = "gemini-1.5-pro-latest";
 const GEMINI_URL      = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-// ---- State ------------------------------------------------------
+// State
 let allPrograms = [];
 let sortCol     = null;
 let sortDir     = 1;
 
-// ---- DOM refs ---------------------------------------------------
+// DOM refs
 const urlInput        = document.getElementById("urlInput");
 const apiProvider     = document.getElementById("apiProvider");
 const apiKeyInput     = document.getElementById("apiKeyInput");
@@ -72,7 +69,7 @@ function updateHint() {
   }
 }
 
-// ---- Main flow --------------------------------------------------
+// Main flow
 scrapeBtn.addEventListener("click", runScrape);
 urlInput.addEventListener("keydown", e => { if (e.key === "Enter") runScrape(); });
 
@@ -129,7 +126,7 @@ async function runScrape() {
   scrapeBtn.disabled = false;
 }
 
-// ---- Fetch via Cloudflare Worker --------------------------------
+// Fetch via Cloudflare Worker
 async function fetchWithWorker(url) {
   const proxyUrl = WORKER_URL.replace(/\/$/, "") + "?url=" + encodeURIComponent(url);
   let res;
@@ -144,7 +141,7 @@ async function fetchWithWorker(url) {
   return data.contents;
 }
 
-// ---- Shared extraction prompt -----------------------------------
+// Shared extraction prompt
 function buildPrompt(sourceUrl) {
   return `You are a precise data extraction tool. Extract all academic programs from the university HTML page below.
 
@@ -176,7 +173,7 @@ Rules:
 Source URL: ${sourceUrl}`;
 }
 
-// ---- Anthropic extraction ---------------------------------------
+// Anthropic extraction
 async function extractWithAnthropic(rawHtml, sourceUrl, apiKey) {
   const cleaned = cleanHtml(rawHtml);
   const prompt  = buildPrompt(sourceUrl);
@@ -206,7 +203,7 @@ async function extractWithAnthropic(rawHtml, sourceUrl, apiKey) {
   return parseJsonResponse(data?.content?.[0]?.text ?? "");
 }
 
-// ---- Gemini extraction ------------------------------------------
+// Gemini extraction
 async function extractWithGemini(rawHtml, sourceUrl, apiKey) {
   const cleaned = cleanHtml(rawHtml);
   const prompt  = buildPrompt(sourceUrl) + "\n\nHTML:\n" + cleaned;
@@ -229,7 +226,7 @@ async function extractWithGemini(rawHtml, sourceUrl, apiKey) {
   return parseJsonResponse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "");
 }
 
-// ---- Shared helpers ---------------------------------------------
+// Shared helpers
 function cleanHtml(raw) {
   let c = raw
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -259,7 +256,7 @@ function parseJsonResponse(raw) {
   return parsed;
 }
 
-// ---- Subject mapping --------------------------------------------
+// Subject mapping
 function mapSubjects(program) {
   if (typeof SUBJECT_MAP === "undefined") return { ...program };
   const key = (program.name ?? "").toLowerCase().trim();
@@ -275,7 +272,7 @@ function mapSubjects(program) {
   return { ...program, narrow_subject: program.narrow_subject || "", broad_subject: program.broad_subject || "" };
 }
 
-// ---- Render -----------------------------------------------------
+// Render
 function renderResults(sourceUrl) {
   let host;
   try { host = new URL(sourceUrl).hostname; } catch { host = sourceUrl; }
@@ -377,7 +374,7 @@ function levelBadge(level) {
   return `<span class="level-badge ${cls}">${esc(level ?? "-")}</span>`;
 }
 
-// ---- Modal ------------------------------------------------------
+// Modal
 function openModal(p) {
   modalTitle.textContent = p.name ?? "Program Details";
   const fields = [
@@ -410,7 +407,7 @@ modalClose.addEventListener("click", () => modal.classList.add("hidden"));
 modal.addEventListener("click", e => { if (e.target === modal) modal.classList.add("hidden"); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") modal.classList.add("hidden"); });
 
-// ---- Sorting ----------------------------------------------------
+// Sorting
 document.querySelectorAll("th[data-col]").forEach(th => {
   th.addEventListener("click", () => {
     const col = th.dataset.col;
@@ -422,7 +419,7 @@ document.querySelectorAll("th[data-col]").forEach(th => {
   });
 });
 
-// ---- Export CSV -------------------------------------------------
+// Export CSV
 exportBtn.addEventListener("click", () => {
   if (!allPrograms.length) return;
   const cols = ["name", "level", "department", "broad_subject", "narrow_subject", "mode",
@@ -441,7 +438,7 @@ exportBtn.addEventListener("click", () => {
   a.click();
 });
 
-// ---- Clear ------------------------------------------------------
+// Clear
 clearBtn.addEventListener("click", () => {
   allPrograms = [];
   urlInput.value = "";
@@ -450,7 +447,7 @@ clearBtn.addEventListener("click", () => {
   [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => el.value = "");
 });
 
-// ---- Helpers ----------------------------------------------------
+// Helpers
 function showStatus(msg, pct) {
   statusSection.classList.remove("hidden");
   statusText.textContent   = msg;
