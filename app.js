@@ -47,7 +47,7 @@ const filterMode       = document.getElementById("filterMode");
 const filterScholarship= document.getElementById("filterScholarship");
 const filterDept       = document.getElementById("filterDept");
 
-// ---- Persist settings -------------------------------------------
+// Persist settings
 apiProvider.value  = localStorage.getItem("uniscrape_provider") || "anthropic";
 apiKeyInput.value  = localStorage.getItem("uniscrape_key_" + apiProvider.value) || "";
 updateHint();
