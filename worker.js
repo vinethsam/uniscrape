@@ -1,10 +1,10 @@
-/* ---------------------------------------------------------------
+/*
    UniScrape - Cloudflare Worker
    Acts as a CORS proxy. Fetches a university page server-side
    and returns the HTML to the browser.
    
    Deploy this at: workers.cloudflare.com
----------------------------------------------------------------- */
+*/
 
 export default {
   async fetch(request, env, ctx) {
