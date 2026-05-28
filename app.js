@@ -6,12 +6,12 @@
    - MAX_HTML_CHARS reduced from 120,000 to 80,000 (cost saving)
    - cleanHtml() now strips nav, footer, header, sidebar, cookie
      banners and other non-content elements before sending to API
- */
+*/
 
 //Config
 const MAX_HTML_CHARS  = 80000;
 const WORKER_URL      = "https://uniscrape-proxy.itsvineth05.workers.dev";
-const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const ANTHROPIC_MODEL = "claude-sonnet-4-5";
 const GEMINI_MODEL    = "gemini-1.5-pro-latest";
 const GEMINI_URL      = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
