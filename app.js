@@ -1,11 +1,15 @@
 /*
-   UniScrape v2.3 - app.js
+   UniScrape v2.3.1 - app.js
    Supports Anthropic and Google Gemini APIs.
    Proxy: https://uniscrape-proxy.itsvineth05.workers.dev
-*/
+   Changes from v2.3:
+   - MAX_HTML_CHARS reduced from 120,000 to 80,000 (cost saving)
+   - cleanHtml() now strips nav, footer, header, sidebar, cookie
+     banners and other non-content elements before sending to API
+ */
 
 //Config
-const MAX_HTML_CHARS  = 120000;
+const MAX_HTML_CHARS  = 80000;
 const WORKER_URL      = "https://uniscrape-proxy.itsvineth05.workers.dev";
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const GEMINI_MODEL    = "gemini-1.5-pro-latest";
@@ -147,7 +151,7 @@ Return ONLY a valid JSON array. No markdown fences, no explanation, no preamble 
 
 Each object must have exactly the keys listed below. Use "" for any field not found. Never invent or estimate data.
 
-PROGRAM IDENTIFICATION
+--- PROGRAM IDENTIFICATION ---
 "name"
   Full official program name as listed on the page.
 
@@ -185,7 +189,7 @@ PROGRAM IDENTIFICATION
 "language_of_instruction"
   Language the program is taught in. Use "English" if confirmed English-medium. Use "" if not mentioned.
 
-PROGRAM DESCRIPTION
+--- PROGRAM DESCRIPTION ---
 "description"
   Extract the official program description from the page. This must be the actual academic description of what the program covers, its objectives, learning outcomes, or curriculum overview.
 
@@ -202,14 +206,14 @@ PROGRAM DESCRIPTION
   - Do not add formatting that was not present in the original source
   - If no genuine program description is found, use ""
 
-INTAKE AND DATES
+--- INTAKE AND DATES ---
 "intake_dates"
   All available start months or semesters (e.g. "September", "January / September", "Semester 1 / Semester 2", "October 2025"). Use "" if not stated.
 
 "application_deadline"
   Application deadline if stated (e.g. "31 January 2026", "Rolling admissions", "6 weeks before start"). Use "" if not stated.
 
-TUITION FEES
+--- TUITION FEES ---
 For all fee fields: include the numeric amount only, no currency symbols. If a range is given include both (e.g. "15000 - 18000").
 
 "fee_international"   Tuition fee for international or overseas students.
@@ -225,7 +229,7 @@ For all fee fields: include the numeric amount only, no currency symbols. If a r
   If no financial aid is mentioned, use "".
   Do not describe the financial aid here - the system will replace this value automatically.
 
-ENTRY REQUIREMENTS
+--- ENTRY REQUIREMENTS ---
 "entry_requirements_general"
   General academic entry requirements applicable to all applicants (e.g. "Upper second class honours degree (2:1) or equivalent", "Minimum 2 years relevant work experience plus a bachelor's degree"). Include A-level requirements, IB scores, GCE requirements, or equivalent qualifications if stated.
 
@@ -274,7 +278,7 @@ ENTRY REQUIREMENTS
 "entry_work_experience"
   Work experience requirement if stated (e.g. "Minimum 2 years professional experience", "Managerial experience preferred"). Use "" if not stated.
 
-APPLICATION REQUIREMENTS
+--- APPLICATION REQUIREMENTS ---
 For the following four fields: use "Yes" if the requirement is stated or strongly implied anywhere on the page including in a general admissions or entry requirements section. Use "No" only if explicitly stated that it is not required. Use "" if not mentioned at all.
 
 "rec_letter"       References, recommendation letters, or letters of support.
@@ -282,7 +286,7 @@ For the following four fields: use "Yes" if the requirement is stated or strongl
 "portfolio"        Portfolio, creative samples, or work samples.
 "interview"        Interview, audition, or selection day.
 
-FUNDING
+--- FUNDING ---
 "scholarship"
   "Yes" if any scholarships are mentioned for this program or for international students at this university. "No" if explicitly stated that no scholarships are available. "" if not mentioned.
 
@@ -292,11 +296,11 @@ FUNDING
 "accreditation"
   Professional body or industry accreditation mentioned (e.g. "AACSB accredited", "Accredited by BPS", "ABET accredited", "EQUIS", "AMBA"). Use "" if not stated.
 
-CLASSIFICATION (leave both blank - filled automatically)
+--- CLASSIFICATION (leave both blank - filled automatically) ---
 "narrow_subject"   ""
 "broad_subject"    ""
 
-EXTRACTION RULES
+--- EXTRACTION RULES ---
 1. Only extract genuine academic programs. Skip: news, events, staff profiles, research projects, login pages, FAQs, navigation links, external site links, generic page sections.
 2. Never invent or estimate data. If not explicitly on this page, use "".
 3. Deduplicate: if the same program appears more than once with the same name and level, include it once only.
@@ -372,9 +376,22 @@ async function extractWithGemini(rawHtml, sourceUrl, apiKey) {
 //Shared helpers
 function cleanHtml(raw) {
   let c = raw
+    // Remove non-content structural elements
+    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
+    .replace(/<aside[\s\S]*?<\/aside>/gi, "")
+    // Remove common cookie/consent banners by id and class patterns
+    .replace(/<div[^>]*(?:cookie|consent|gdpr|banner|notification|alert|popup|modal|overlay|toast|notice)[^>]*>[\s\S]*?<\/div>/gi, "")
+    // Remove social media and share widgets
+    .replace(/<div[^>]*(?:social|share|twitter|facebook|instagram|linkedin|youtube)[^>]*>[\s\S]*?<\/div>/gi, "")
+    // Remove scripts, styles, comments
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<!--[\s\S]*?-->/g, "")
+    // Remove SVG elements (icons, logos - not relevant to content)
+    .replace(/<svg[\s\S]*?<\/svg>/gi, "")
+    // Collapse excess whitespace
     .replace(/\s{3,}/g, "  ");
   if (c.length > MAX_HTML_CHARS) c = c.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
   return c;
