@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UniScrape - Program Finder</title>
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
+    .error-retry-btn { align-self: flex-start; }
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
@@ -79,7 +83,10 @@
     <section id="errorSection" class="hidden">
       <div class="error-box">
         <span class="error-label">ERROR</span>
-        <span id="errorText"></span>
+        <div class="error-body">
+          <span id="errorText"></span>
+          <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
+        </div>
       </div>
     </section>
 
@@ -177,6 +184,7 @@
     <p>Data sourced exclusively from official university websites. UniScrape v2.3.1</p>
   </footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js"></script>
   <script src="subject_mapping.js"></script>
   <script src="app.js"></script>
 </body>

@@ -3,12 +3,12 @@
    Supports Anthropic and Google Gemini APIs.
    Proxy: https://uniscrape-proxy.itsvineth05.workers.dev
    Changes from v2.3:
-   - MAX_HTML_CHARS reduced from 120,000 to 80,000 (cost saving)
-   - cleanHtml() now strips nav, footer, header, sidebar, cookie
-     banners and other non-content elements before sending to API
+   - MAX_HTML_CHARS (80,000) applies to cleaned markdown sent to the API
+   - cleanHtml() extracts main content, strips chrome, converts to markdown via Turndown
+   - Retry button on errors; status shows approximate payload character count
 */
 
-//Config
+//Config — limit applies to cleaned markdown, not raw HTML
 const MAX_HTML_CHARS  = 80000;
 const WORKER_URL      = "https://uniscrape-proxy.itsvineth05.workers.dev";
 const ANTHROPIC_MODEL = "claude-sonnet-4-5";
@@ -33,6 +33,7 @@ const statusText       = document.getElementById("statusText");
 const progressFill     = document.getElementById("progressFill");
 const errorSection     = document.getElementById("errorSection");
 const errorText        = document.getElementById("errorText");
+const retryBtn         = document.getElementById("retryBtn");
 const resultsSection   = document.getElementById("resultsSection");
 const tableBody        = document.getElementById("tableBody");
 const resultCount      = document.getElementById("resultCount");
@@ -75,6 +76,7 @@ function updateHint() {
 
 //Main flow
 scrapeBtn.addEventListener("click", runScrape);
+retryBtn.addEventListener("click", () => { clearError(); runScrape(); });
 urlInput.addEventListener("keydown", e => { if (e.key === "Enter") runScrape(); });
 
 async function runScrape() {
@@ -100,13 +102,24 @@ async function runScrape() {
     return showError("Could not fetch the page: " + e.message + ". Make sure your Cloudflare Worker is deployed and the URL is correct.");
   }
 
-  showStatus("Extracting program data...", 40);
+  showStatus("Cleaning page content and converting to markdown...", 35);
+
+  let markdown;
+  try {
+    markdown = cleanHtml(html);
+  } catch (e) {
+    scrapeBtn.disabled = false;
+    return showError("Could not process page content: " + e.message);
+  }
+
+  const providerLabel = provider === "anthropic" ? "Anthropic" : "Gemini";
+  showStatus(`Sending ~${markdown.length.toLocaleString()} characters to ${providerLabel}...`, 55);
 
   let programs;
   try {
     programs = provider === "anthropic"
-      ? await extractWithAnthropic(html, url, apiKey)
-      : await extractWithGemini(html, url, apiKey);
+      ? await extractWithAnthropic(markdown, url, apiKey)
+      : await extractWithGemini(markdown, url, apiKey);
   } catch (e) {
     scrapeBtn.disabled = false;
     return showError("Extraction failed: " + e.message);
@@ -145,7 +158,7 @@ async function fetchWithWorker(url) {
 
 //Extraction prompt
 function buildPrompt(sourceUrl) {
-  return `You are a precise university data extraction tool. Extract every academic program from the HTML page provided and return structured data as a JSON array.
+  return `You are a precise university data extraction tool. Extract every academic program from the cleaned markdown content of a university webpage and return structured data as a JSON array.
 
 Return ONLY a valid JSON array. No markdown fences, no explanation, no preamble - just the raw JSON array starting with [ and ending with ].
 
@@ -328,8 +341,7 @@ function applyFinancialAidStatement(p) {
 }
 
 //Anthropic extraction
-async function extractWithAnthropic(rawHtml, sourceUrl, apiKey) {
-  const cleaned = cleanHtml(rawHtml);
+async function extractWithAnthropic(markdown, sourceUrl, apiKey) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -342,7 +354,7 @@ async function extractWithAnthropic(rawHtml, sourceUrl, apiKey) {
       model: ANTHROPIC_MODEL,
       max_tokens: 8192,
       system: buildPrompt(sourceUrl),
-      messages: [{ role: "user", content: "HTML:\n" + cleaned }],
+      messages: [{ role: "user", content: "Markdown:\n" + markdown }],
     }),
   });
   if (!res.ok) {
@@ -354,9 +366,8 @@ async function extractWithAnthropic(rawHtml, sourceUrl, apiKey) {
 }
 
 //Gemini extraction
-async function extractWithGemini(rawHtml, sourceUrl, apiKey) {
-  const cleaned = cleanHtml(rawHtml);
-  const prompt  = buildPrompt(sourceUrl) + "\n\nHTML:\n" + cleaned;
+async function extractWithGemini(markdown, sourceUrl, apiKey) {
+  const prompt  = buildPrompt(sourceUrl) + "\n\nMarkdown:\n" + markdown;
   const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -374,27 +385,53 @@ async function extractWithGemini(rawHtml, sourceUrl, apiKey) {
 }
 
 //Shared helpers
+const MAIN_CONTENT_SELECTORS = [
+  "main",
+  "article",
+  "[role=main]",
+  ".main-content",
+  "#content",
+  "#main",
+];
+
+let turndownService;
+
+function getTurndown() {
+  if (!turndownService) {
+    if (typeof TurndownService === "undefined") {
+      throw new Error("Turndown library not loaded. Check your network connection and refresh the page.");
+    }
+    turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
+  }
+  return turndownService;
+}
+
 function cleanHtml(raw) {
-  let c = raw
-    // Remove non-content structural elements
-    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
-    .replace(/<header[\s\S]*?<\/header>/gi, "")
-    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
-    .replace(/<aside[\s\S]*?<\/aside>/gi, "")
-    // Remove common cookie/consent banners by id and class patterns
+  const doc = new DOMParser().parseFromString(raw, "text/html");
+
+  let root = null;
+  for (const sel of MAIN_CONTENT_SELECTORS) {
+    root = doc.querySelector(sel);
+    if (root) break;
+  }
+  if (!root) root = doc.body;
+  if (!root) throw new Error("Page has no parseable content.");
+
+  root.querySelectorAll("nav, footer, header, aside, script, style, svg").forEach(el => el.remove());
+
+  let fragment = root.innerHTML
     .replace(/<div[^>]*(?:cookie|consent|gdpr|banner|notification|alert|popup|modal|overlay|toast|notice)[^>]*>[\s\S]*?<\/div>/gi, "")
-    // Remove social media and share widgets
     .replace(/<div[^>]*(?:social|share|twitter|facebook|instagram|linkedin|youtube)[^>]*>[\s\S]*?<\/div>/gi, "")
-    // Remove scripts, styles, comments
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    // Remove SVG elements (icons, logos - not relevant to content)
-    .replace(/<svg[\s\S]*?<\/svg>/gi, "")
-    // Collapse excess whitespace
-    .replace(/\s{3,}/g, "  ");
-  if (c.length > MAX_HTML_CHARS) c = c.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
-  return c;
+    .replace(/<!--[\s\S]*?-->/g, "");
+
+  let markdown = getTurndown().turndown(fragment)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (markdown.length > MAX_HTML_CHARS) {
+    markdown = markdown.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
+  }
+  return markdown;
 }
 
 function parseJsonResponse(raw) {
@@ -683,8 +720,16 @@ function showStatus(msg, pct) {
   progressFill.style.width = pct + "%";
 }
 function hideStatus()  { statusSection.classList.add("hidden"); progressFill.style.width = "0%"; }
-function showError(m)  { errorSection.classList.remove("hidden"); errorText.textContent = m; hideStatus(); }
-function clearError()  { errorSection.classList.add("hidden"); }
+function showError(m)  {
+  errorSection.classList.remove("hidden");
+  errorText.textContent = m;
+  retryBtn.classList.remove("hidden");
+  hideStatus();
+}
+function clearError()  {
+  errorSection.classList.add("hidden");
+  retryBtn.classList.add("hidden");
+}
 function hideResults() { resultsSection.classList.add("hidden"); }
 function sleep(ms)     { return new Promise(r => setTimeout(r, ms)); }
 function esc(str) {
