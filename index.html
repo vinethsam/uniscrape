@@ -8,6 +8,15 @@
   <style>
     .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
     .error-retry-btn { align-self: flex-start; }
+    .debug-options { display: flex; flex-wrap: wrap; gap: 1.25rem 2rem; align-items: flex-end; padding-top: 0.25rem; border-top: 1px solid var(--border, #2a2a2a); margin-top: 0.25rem; }
+    .debug-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--text-muted, #666); cursor: pointer; }
+    .debug-check input { accent-color: var(--green, #4ec994); }
+    .content-mode-group { min-width: 160px; }
+    .debug-panel .debug-title { font-size: 0.72rem; font-weight: 600; color: var(--accent-dim, #888); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.75rem; }
+    .debug-stats { display: grid; gap: 0.35rem; font-size: 0.78rem; margin-bottom: 1rem; }
+    .debug-k { color: var(--text-muted, #666); margin-right: 0.35rem; }
+    .debug-warnings { margin: 0 0 1rem 1.1rem; font-size: 0.76rem; color: var(--yellow, #e5c07b); }
+    .debug-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -65,6 +74,38 @@
             Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>
           </p>
         </div>
+      </div>
+
+      <div class="debug-options">
+        <label class="debug-check">
+          <input type="checkbox" id="debugMode" />
+          Debug mode — save raw and cleaned content
+        </label>
+        <div class="field-group content-mode-group">
+          <label class="field-label" for="contentMode">Content mode</label>
+          <select id="contentMode" class="text-input">
+            <option value="auto">Auto</option>
+            <option value="best">Best content</option>
+            <option value="body">Full body</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Debug (visible only when debug mode is on and after cleaning) -->
+    <section id="debugPanel" class="panel debug-panel hidden">
+      <div class="debug-title">Content diagnostics</div>
+      <div id="debugStats" class="debug-stats"></div>
+      <div id="debugWarningsBlock" class="hidden">
+        <div class="field-label">Warnings</div>
+        <ul id="debugWarnings" class="debug-warnings"></ul>
+      </div>
+      <div class="debug-actions">
+        <button type="button" id="downloadRawBtn" class="secondary-btn">Download Raw HTML</button>
+        <button type="button" id="downloadSelectedBtn" class="secondary-btn">Download Selected HTML</button>
+        <button type="button" id="downloadMarkdownBtn" class="secondary-btn">Download Markdown</button>
+        <button type="button" id="copyMarkdownBtn" class="ghost-btn">Copy Markdown Preview</button>
+        <button type="button" id="downloadPreviewBtn" class="ghost-btn">Download Extraction Preview</button>
       </div>
     </section>
 

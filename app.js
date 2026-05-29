@@ -6,12 +6,15 @@
    - MAX_HTML_CHARS (80,000) applies to cleaned markdown sent to the API
    - cleanHtml() extracts main content, strips chrome, converts to markdown via Turndown
    - Retry button on errors; status shows approximate payload character count
+   - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
-const MAX_HTML_CHARS  = 80000;
-const WORKER_URL      = "https://uniscrape-proxy.itsvineth05.workers.dev";
-const ANTHROPIC_MODEL = "claude-sonnet-4-5";
+const MAX_HTML_CHARS     = 80000;
+const MIN_MARKDOWN_CHARS = 500;
+const WORKER_URL         = "https://uniscrape-proxy.itsvineth05.workers.dev";
+// Alternative if API rejects the model id: "claude-sonnet-4-20250514"
+const ANTHROPIC_MODEL    = "claude-sonnet-4-5";
 const GEMINI_MODEL    = "gemini-1.5-pro-latest";
 const GEMINI_URL      = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
@@ -21,6 +24,36 @@ const FINANCIAL_AID_STATEMENT = "This university offers some form of financial a
 let allPrograms = [];
 let sortCol     = null;
 let sortDir     = 1;
+
+let debugState = {
+  rawHtml: "",
+  selectedHtml: "",
+  markdown: "",
+  rootStrategy: "",
+  extractionPreview: "",
+  warnings: [],
+  stats: {},
+};
+
+const POSITIVE_KEYWORDS = [
+  "course", "courses", "programme", "program", "programmes", "programs",
+  "undergraduate", "postgraduate", "bachelor", "bachelors", "master's", "masters",
+  "msc", "ma", "mba", "bsc", "ba", "beng", "phd", "doctorate", "diploma",
+  "certificate", "degree", "study", "tuition", "fees", "entry requirements",
+  "admissions", "international", "scholarship", "apply",
+];
+
+const NEGATIVE_KEYWORDS = [
+  "news", "event", "events", "alumni", "staff", "privacy", "cookie",
+  "login", "social", "footer", "navigation",
+];
+
+const CANDIDATE_SELECTORS = [
+  "main", "article", "[role=main]", ".main-content", ".content", ".page-content",
+  ".site-content", ".course-list", ".courses-list", ".programme-list", ".program-list",
+  ".programmes", ".programs", ".courses", ".search-results", ".results",
+  ".listing", ".listings", "#content", "#main", "#app", "#root", "body",
+];
 
 //DOM refs
 const urlInput         = document.getElementById("urlInput");
@@ -51,11 +84,41 @@ const filterBroad      = document.getElementById("filterBroad");
 const filterMode       = document.getElementById("filterMode");
 const filterScholarship= document.getElementById("filterScholarship");
 const filterDept       = document.getElementById("filterDept");
+const debugModeInput   = document.getElementById("debugMode");
+const contentModeSelect= document.getElementById("contentMode");
+const debugPanel       = document.getElementById("debugPanel");
+const debugStatsEl     = document.getElementById("debugStats");
+const debugWarningsEl  = document.getElementById("debugWarnings");
+const debugWarningsBlock = document.getElementById("debugWarningsBlock");
+const downloadRawBtn   = document.getElementById("downloadRawBtn");
+const downloadSelectedBtn = document.getElementById("downloadSelectedBtn");
+const downloadMarkdownBtn = document.getElementById("downloadMarkdownBtn");
+const copyMarkdownBtn  = document.getElementById("copyMarkdownBtn");
+const downloadPreviewBtn = document.getElementById("downloadPreviewBtn");
 
 //Persist settings
 apiProvider.value = localStorage.getItem("uniscrape_provider") || "anthropic";
 apiKeyInput.value = localStorage.getItem("uniscrape_key_" + apiProvider.value) || "";
+if (debugModeInput) {
+  debugModeInput.checked = localStorage.getItem("uniscrape_debug") === "1";
+  debugModeInput.addEventListener("change", () => {
+    localStorage.setItem("uniscrape_debug", debugModeInput.checked ? "1" : "0");
+    if (!debugModeInput.checked) hideDebugPanel();
+  });
+}
+if (contentModeSelect) {
+  contentModeSelect.value = localStorage.getItem("uniscrape_content_mode") || "auto";
+  contentModeSelect.addEventListener("change", () => {
+    localStorage.setItem("uniscrape_content_mode", contentModeSelect.value);
+  });
+}
 updateHint();
+
+if (downloadRawBtn) downloadRawBtn.addEventListener("click", () => downloadTextFile("uniscrape_raw_html.txt", debugState.rawHtml));
+if (downloadSelectedBtn) downloadSelectedBtn.addEventListener("click", () => downloadTextFile("uniscrape_selected_html.txt", debugState.selectedHtml));
+if (downloadMarkdownBtn) downloadMarkdownBtn.addEventListener("click", () => downloadTextFile("uniscrape_markdown.txt", debugState.markdown));
+if (downloadPreviewBtn) downloadPreviewBtn.addEventListener("click", () => downloadTextFile("uniscrape_extraction_preview.txt", debugState.extractionPreview));
+if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
 apiProvider.addEventListener("change", () => {
   localStorage.setItem("uniscrape_provider", apiProvider.value);
@@ -84,8 +147,10 @@ async function runScrape() {
   const apiKey   = apiKeyInput.value.trim();
   const provider = apiProvider.value;
 
+  resetDebugState();
   clearError();
   hideResults();
+  hideDebugPanel();
 
   if (!url)    return showError("Please enter a URL.");
   if (!apiKey) return showError("Please enter your API key.");
@@ -102,15 +167,35 @@ async function runScrape() {
     return showError("Could not fetch the page: " + e.message + ". Make sure your Cloudflare Worker is deployed and the URL is correct.");
   }
 
+  debugState.rawHtml = html;
+  if (isDebugMode()) debugLog("Raw HTML length:", html.length);
+
   showStatus("Cleaning page content and converting to markdown...", 35);
 
   let markdown;
   try {
-    markdown = cleanHtml(html);
+    markdown = prepareMarkdown(html);
   } catch (e) {
     scrapeBtn.disabled = false;
     return showError("Could not process page content: " + e.message);
   }
+
+  if (isDebugMode()) {
+    renderDebugPanel();
+    debugLog("Selected root strategy:", debugState.rootStrategy);
+    debugLog("Selected HTML length:", debugState.selectedHtml.length);
+    debugLog("Markdown length:", markdown.length);
+    debugLog("Markdown preview (first 5000 chars):\n", markdown.slice(0, 5000));
+  }
+
+  if (markdown.length < MIN_MARKDOWN_CHARS) {
+    scrapeBtn.disabled = false;
+    return showError(
+      "Cleaned content is too short to extract programs. Enable Debug mode and inspect the raw HTML/markdown. This page may require rendered fetching."
+    );
+  }
+
+  debugState.extractionPreview = buildExtractionPreview(markdown, url, provider);
 
   const providerLabel = provider === "anthropic" ? "Anthropic" : "Gemini";
   showStatus(`Sending ~${markdown.length.toLocaleString()} characters to ${providerLabel}...`, 55);
@@ -123,6 +208,13 @@ async function runScrape() {
   } catch (e) {
     scrapeBtn.disabled = false;
     return showError("Extraction failed: " + e.message);
+  }
+
+  if (!programs.length) {
+    scrapeBtn.disabled = false;
+    return showError(
+      "No programs were extracted. The cleaned markdown may not contain the actual program listing, or the page may load programs dynamically with JavaScript. Enable Debug mode and inspect the Markdown download."
+    );
   }
 
   showStatus("Mapping subjects...", 82);
@@ -159,6 +251,14 @@ async function fetchWithWorker(url) {
 //Extraction prompt
 function buildPrompt(sourceUrl) {
   return `You are a precise university data extraction tool. Extract every academic program from the cleaned markdown content of a university webpage and return structured data as a JSON array.
+
+The content may be from either:
+- a single program detail page, or
+- a program/course listing page containing many program cards or links.
+
+If the page is a listing page, extract every visible academic program from the listing, even if only limited fields are available. For listing pages, it is acceptable for many fields to be blank as long as the program name, level if inferable, and URL are captured.
+
+Do not reject a listing page simply because fees, IELTS, or descriptions are missing. Extract the programs that are visible and leave missing fields blank.
 
 Return ONLY a valid JSON array. No markdown fences, no explanation, no preamble - just the raw JSON array starting with [ and ending with ].
 
@@ -384,54 +484,377 @@ async function extractWithGemini(markdown, sourceUrl, apiKey) {
   return parseJsonResponse(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "");
 }
 
-//Shared helpers
-const MAIN_CONTENT_SELECTORS = [
-  "main",
-  "article",
-  "[role=main]",
-  ".main-content",
-  "#content",
-  "#main",
-];
-
+//Content selection and cleaning
 let turndownService;
+
+function resetDebugState() {
+  debugState.rawHtml = "";
+  debugState.selectedHtml = "";
+  debugState.markdown = "";
+  debugState.rootStrategy = "";
+  debugState.extractionPreview = "";
+  debugState.warnings = [];
+  debugState.stats = {};
+}
+
+function isDebugMode() {
+  return Boolean(debugModeInput?.checked);
+}
+
+function debugLog(...args) {
+  if (isDebugMode()) console.log("[UniScrape debug]", ...args);
+}
+
+function countKeywords(text, keywords) {
+  const lower = (text || "").toLowerCase();
+  let total = 0;
+  for (const kw of keywords) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = lower.match(new RegExp("\\b" + escaped + "\\b", "gi"));
+    if (matches) total += matches.length;
+  }
+  return total;
+}
+
+function isLikelyUsefulAcademicContent(text) {
+  const t = (text || "").trim();
+  if (t.length < 40) return false;
+  const pos = countKeywords(t, POSITIVE_KEYWORDS);
+  const linksHint = /(course|program|programme|degree|study|bsc|msc|mba|phd)/i.test(t);
+  return pos >= 2 || (pos >= 1 && linksHint && t.length > 120);
+}
+
+function scoreContentNode(node) {
+  if (!node) return -Infinity;
+  const text = node.textContent || "";
+  const textLen = text.trim().length;
+  if (textLen < 80) return textLen - 500;
+
+  const links = node.querySelectorAll("a[href]");
+  const headings = node.querySelectorAll("h1,h2,h3,h4,h5,h6");
+  const listItems = node.querySelectorAll("li");
+
+  let score = Math.min(textLen / 50, 400);
+  score += Math.min(links.length * 3, 150);
+  score += Math.min(headings.length * 8, 80);
+  score += Math.min(listItems.length * 2, 120);
+  score += countKeywords(text, POSITIVE_KEYWORDS) * 12;
+  score -= countKeywords(text, NEGATIVE_KEYWORDS) * 15;
+
+  const tag = (node.tagName || "").toLowerCase();
+  const role = node.getAttribute?.("role") || "";
+  const id = (node.id || "").toLowerCase();
+  const cls = (typeof node.className === "string" ? node.className : "").toLowerCase();
+  const meta = id + " " + cls + " " + role;
+
+  if (tag === "main" || role === "main") score += 40;
+  if (/course|program|programme|listing|search-result|results/.test(meta)) score += 60;
+  if (tag === "nav" || tag === "footer" || tag === "header" || tag === "aside") score -= 200;
+  if (/news|event|alumni|cookie|footer|nav|social|privacy/.test(meta)) score -= 80;
+
+  return score;
+}
+
+function selectBestContentRoot(doc, forceBody = false) {
+  if (forceBody && doc.body) {
+    return {
+      node: doc.body,
+      strategy: "full-body",
+      score: scoreContentNode(doc.body),
+      candidatesChecked: 1,
+    };
+  }
+
+  const seen = new Set();
+  const candidates = [];
+
+  for (const sel of CANDIDATE_SELECTORS) {
+    doc.querySelectorAll(sel).forEach(node => {
+      if (seen.has(node)) return;
+      seen.add(node);
+      candidates.push({
+        node,
+        selector: sel,
+        score: scoreContentNode(node),
+      });
+    });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const best = candidates[0];
+
+  if (!best?.node) {
+    return {
+      node: doc.body,
+      strategy: "body-fallback",
+      score: scoreContentNode(doc.body),
+      candidatesChecked: candidates.length,
+    };
+  }
+
+  return {
+    node: best.node,
+    strategy: `best-root (${best.selector}, score ${Math.round(best.score)})`,
+    score: best.score,
+    candidatesChecked: candidates.length,
+  };
+}
+
+function countCourseLikeLinks(root) {
+  let count = 0;
+  root.querySelectorAll("a[href]").forEach(a => {
+    const blob = ((a.getAttribute("href") || "") + " " + (a.textContent || "")).toLowerCase();
+    if (/course|program|programme|study|degree|bsc|msc|mba|phd|bachelor|master/.test(blob)) count++;
+  });
+  return count;
+}
+
+function safeRemoveChrome(root) {
+  root.querySelectorAll("nav, footer, header, aside").forEach(el => {
+    if (el === root) return;
+    const text = el.textContent || "";
+    if (isLikelyUsefulAcademicContent(text)) return;
+    if (countCourseLikeLinks(el) >= 3) return;
+    el.remove();
+  });
+}
+
+function removeNoiseDivs(root) {
+  root.querySelectorAll("div").forEach(div => {
+    const meta = ((div.id || "") + " " + (typeof div.className === "string" ? div.className : "")).toLowerCase();
+    const text = div.textContent || "";
+    const isNoise = /cookie|consent|gdpr|banner|notification|alert|popup|modal|overlay|toast|notice/.test(meta);
+    const isSocial = /social|share|twitter|facebook|instagram|linkedin|youtube/.test(meta);
+    if ((isNoise || isSocial) && !isLikelyUsefulAcademicContent(text)) div.remove();
+  });
+}
+
+function stripAlwaysUnsafe(root) {
+  root.querySelectorAll("script, style, svg").forEach(el => el.remove());
+  const doc = root.ownerDocument || document;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+  const comments = [];
+  while (walker.nextNode()) comments.push(walker.currentNode);
+  comments.forEach(c => c.remove());
+}
+
+function htmlToMarkdown(html) {
+  let markdown = getTurndown().turndown(html).replace(/\n{3,}/g, "\n\n").trim();
+  if (markdown.length > MAX_HTML_CHARS) {
+    markdown = markdown.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
+  }
+  return markdown;
+}
+
+function scoreMarkdown(md) {
+  let score = (md || "").length / 10;
+  score += countKeywords(md, POSITIVE_KEYWORDS) * 20;
+  score += ((md || "").match(/\[.*?\]\([^)]+\)/g) || []).length * 5;
+  return score;
+}
+
+function isWeakMarkdown(md) {
+  if (!md || md.length < 800) return true;
+  if (countKeywords(md, POSITIVE_KEYWORDS) < 2) return true;
+  return false;
+}
 
 function getTurndown() {
   if (!turndownService) {
     if (typeof TurndownService === "undefined") {
-      throw new Error("Turndown library not loaded. Check your network connection and refresh the page.");
+      throw new Error("Turndown failed to load. Check internet access or vendor turndown locally.");
     }
     turndownService = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
   }
   return turndownService;
 }
 
-function cleanHtml(raw) {
+function cleanHtml(raw, options = {}) {
+  const { aggressive = false, forceRoot = "best", minimalClean = false } = options;
   const doc = new DOMParser().parseFromString(raw, "text/html");
+  if (!doc.body) throw new Error("Page has no parseable content.");
 
-  let root = null;
-  for (const sel of MAIN_CONTENT_SELECTORS) {
-    root = doc.querySelector(sel);
-    if (root) break;
+  const pick = forceRoot === "body"
+    ? selectBestContentRoot(doc, true)
+    : selectBestContentRoot(doc, false);
+
+  const root = pick.node.cloneNode(true);
+  stripAlwaysUnsafe(root);
+
+  if (!minimalClean) {
+    if (!aggressive) safeRemoveChrome(root);
+    else root.querySelectorAll("nav, footer, header, aside").forEach(el => { if (el !== root) el.remove(); });
+    if (!aggressive) removeNoiseDivs(root);
   }
-  if (!root) root = doc.body;
-  if (!root) throw new Error("Page has no parseable content.");
 
-  root.querySelectorAll("nav, footer, header, aside, script, style, svg").forEach(el => el.remove());
+  const selectedHtml = root.innerHTML;
+  const markdown = htmlToMarkdown(selectedHtml);
+  const strategy = minimalClean && forceRoot === "body" ? "minimal-clean (body)" : pick.strategy;
 
-  let fragment = root.innerHTML
-    .replace(/<div[^>]*(?:cookie|consent|gdpr|banner|notification|alert|popup|modal|overlay|toast|notice)[^>]*>[\s\S]*?<\/div>/gi, "")
-    .replace(/<div[^>]*(?:social|share|twitter|facebook|instagram|linkedin|youtube)[^>]*>[\s\S]*?<\/div>/gi, "")
-    .replace(/<!--[\s\S]*?-->/g, "");
+  return { markdown, selectedHtml, strategy, candidatesChecked: pick.candidatesChecked };
+}
 
-  let markdown = getTurndown().turndown(fragment)
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+function prepareMarkdown(rawHtml) {
+  const mode = contentModeSelect?.value || "auto";
+  let primary;
+  let chosen;
 
-  if (markdown.length > MAX_HTML_CHARS) {
-    markdown = markdown.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
+  if (mode === "body") {
+    chosen = cleanHtml(rawHtml, { forceRoot: "body", minimalClean: true });
+    debugState.rootStrategy = chosen.strategy;
+  } else if (mode === "best") {
+    chosen = cleanHtml(rawHtml, { forceRoot: "best" });
+    debugState.rootStrategy = chosen.strategy;
+  } else {
+    primary = cleanHtml(rawHtml, { forceRoot: "best" });
+    if (isWeakMarkdown(primary.markdown)) {
+      const fallback = cleanHtml(rawHtml, { forceRoot: "body", minimalClean: true });
+      if (scoreMarkdown(fallback.markdown) > scoreMarkdown(primary.markdown)) {
+        chosen = fallback;
+        debugState.rootStrategy = fallback.strategy + " (auto-selected over best-root)";
+      } else {
+        chosen = primary;
+        debugState.rootStrategy = primary.strategy + " (auto kept best-root)";
+      }
+    } else {
+      chosen = primary;
+      debugState.rootStrategy = primary.strategy;
+    }
   }
-  return markdown;
+
+  debugState.selectedHtml = chosen.selectedHtml;
+  debugState.markdown = chosen.markdown;
+  analyzeContent(debugState.rawHtml, debugState.selectedHtml, debugState.markdown);
+  return chosen.markdown;
+}
+
+function analyzeContent(rawHtml, selectedHtml, markdown) {
+  const stats = {
+    rawHtmlLength: rawHtml.length,
+    selectedHtmlLength: selectedHtml.length,
+    markdownLength: markdown.length,
+    positiveKeywordHits: countKeywords(markdown, POSITIVE_KEYWORDS),
+    linkCount: (markdown.match(/\[.*?\]\([^)]+\)/g) || []).length,
+    hasProgramKeywords: countKeywords(markdown, POSITIVE_KEYWORDS) >= 2,
+  };
+  debugState.stats = stats;
+  debugState.warnings = [];
+
+  if (markdown.length < 1500) {
+    debugState.warnings.push("Markdown is suspiciously short — the listing may have been stripped or not fetched.");
+  }
+  if (!stats.hasProgramKeywords) {
+    debugState.warnings.push("Few or no course/program keywords detected in markdown.");
+  }
+
+  const rawLower = rawHtml.toLowerCase();
+  const scriptCount = (rawHtml.match(/<script\b/gi) || []).length;
+  const visibleTextLen = rawHtml.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
+  const jsShellSignals = [
+    scriptCount >= 8 && visibleTextLen < 2500,
+    /id=["']root["']/i.test(rawHtml) && markdown.length < rawHtml.length * 0.02,
+    /id=["']app["']/i.test(rawHtml) && markdown.length < 1200,
+    rawLower.includes("__next_data__"),
+    /\bloading\b/i.test(rawHtml) && stats.positiveKeywordHits < 2,
+    rawLower.includes("window.__initial_state__"),
+    rawHtml.length > 5000 && markdown.length < rawHtml.length * 0.015 && stats.positiveKeywordHits < 2,
+  ];
+
+  if (jsShellSignals.some(Boolean)) {
+    debugState.warnings.push(
+      "This page may load its course list using JavaScript. The current worker fetch may not see the rendered course data. Try a direct program page or implement rendered fetching with Playwright/backend later."
+    );
+    stats.suspectedJsShell = true;
+  } else {
+    stats.suspectedJsShell = false;
+  }
+
+  if (markdown.length >= MIN_MARKDOWN_CHARS && isWeakMarkdown(markdown)) {
+    debugState.warnings.push("Markdown is above minimum length but still looks weak for program extraction.");
+  }
+}
+
+function buildExtractionPreview(markdown, sourceUrl, provider) {
+  const system = buildPrompt(sourceUrl);
+  const userBlock = "Markdown:\n" + markdown;
+  const previewMd = markdown.length > 12000
+    ? markdown.slice(0, 12000) + "\n\n[...truncated in preview...]"
+    : markdown;
+
+  if (provider === "anthropic") {
+    return [
+      "=== EXTRACTION REQUEST PREVIEW ===",
+      `Provider: Anthropic (${ANTHROPIC_MODEL})`,
+      `Markdown chars sent: ${markdown.length}`,
+      "",
+      "--- SYSTEM (truncated to 6000 chars) ---",
+      system.slice(0, 6000) + (system.length > 6000 ? "\n[...]" : ""),
+      "",
+      "--- USER ---",
+      "Markdown:\n" + previewMd,
+    ].join("\n");
+  }
+
+  return [
+    "=== EXTRACTION REQUEST PREVIEW ===",
+    `Provider: Gemini (${GEMINI_MODEL})`,
+    `Markdown chars sent: ${markdown.length}`,
+    "",
+    "--- PROMPT + MARKDOWN (truncated) ---",
+    system.slice(0, 4000) + (system.length > 4000 ? "\n[...]" : ""),
+    "",
+    "Markdown:\n" + previewMd,
+  ].join("\n");
+}
+
+function downloadTextFile(filename, content) {
+  const blob = new Blob([content || ""], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function copyMarkdownPreview() {
+  if (!copyMarkdownBtn) return;
+  const text = debugState.markdown.slice(0, 8000) + (debugState.markdown.length > 8000 ? "\n\n[...]" : "");
+  try {
+    await navigator.clipboard.writeText(text);
+    copyMarkdownBtn.textContent = "Copied!";
+    setTimeout(() => { copyMarkdownBtn.textContent = "Copy Markdown Preview"; }, 2000);
+  } catch {
+    alert("Could not copy to clipboard.");
+  }
+}
+
+function renderDebugPanel() {
+  if (!isDebugMode() || !debugPanel || !debugStatsEl) return;
+
+  const s = debugState.stats;
+  debugStatsEl.innerHTML = [
+    `<div><span class="debug-k">Raw HTML</span> ${s.rawHtmlLength?.toLocaleString() ?? 0} chars</div>`,
+    `<div><span class="debug-k">Selected HTML</span> ${s.selectedHtmlLength?.toLocaleString() ?? 0} chars</div>`,
+    `<div><span class="debug-k">Markdown</span> ${s.markdownLength?.toLocaleString() ?? 0} chars</div>`,
+    `<div><span class="debug-k">Root strategy</span> ${esc(debugState.rootStrategy || "—")}</div>`,
+    `<div><span class="debug-k">Program keywords</span> ${s.positiveKeywordHits ?? 0} hits ${s.hasProgramKeywords ? "(detected)" : "(weak)"}</div>`,
+    `<div><span class="debug-k">Markdown links</span> ${s.linkCount ?? 0}</div>`,
+    `<div><span class="debug-k">JS shell suspected</span> ${s.suspectedJsShell ? "yes" : "no"}</div>`,
+  ].join("");
+
+  if (debugState.warnings.length && debugWarningsEl) {
+    debugWarningsEl.innerHTML = debugState.warnings.map(w => `<li>${esc(w)}</li>`).join("");
+    debugWarningsBlock?.classList.remove("hidden");
+  } else if (debugWarningsEl) {
+    debugWarningsEl.innerHTML = "";
+    debugWarningsBlock?.classList.add("hidden");
+  }
+
+  debugPanel.classList.remove("hidden");
+}
+
+function hideDebugPanel() {
+  debugPanel?.classList.add("hidden");
 }
 
 function parseJsonResponse(raw) {
@@ -710,6 +1133,8 @@ clearBtn.addEventListener("click", () => {
   urlInput.value = "";
   hideResults();
   clearError();
+  hideDebugPanel();
+  resetDebugState();
   [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => el.value = "");
 });
 
