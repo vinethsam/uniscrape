@@ -127,6 +127,7 @@ const filterBroad      = document.getElementById("filterBroad");
 const filterMode       = document.getElementById("filterMode");
 const filterScholarship= document.getElementById("filterScholarship");
 const filterDept       = document.getElementById("filterDept");
+const debugOptionsEl   = document.getElementById("debugOptions");
 const debugModeInput   = document.getElementById("debugMode");
 const contentModeSelect= document.getElementById("contentMode");
 const debugPanel       = document.getElementById("debugPanel");
@@ -144,6 +145,10 @@ const downloadFinalMdBtn = document.getElementById("downloadFinalMdBtn");
 //Persist settings
 apiProvider.value = localStorage.getItem("uniscrape_provider") || "anthropic";
 apiKeyInput.value = localStorage.getItem("uniscrape_key_" + apiProvider.value) || "";
+let debugUiVisible = false;
+let debugKeySeqIndex = 0;
+let debugKeySeqAt = 0;
+
 if (debugModeInput) {
   debugModeInput.checked = localStorage.getItem("uniscrape_debug") === "1";
   debugModeInput.addEventListener("change", () => {
@@ -157,6 +162,9 @@ if (contentModeSelect) {
     localStorage.setItem("uniscrape_content_mode", contentModeSelect.value);
   });
 }
+
+loadDebugUiVisibility();
+initDebugKeyboardShortcut();
 updateHint();
 
 if (downloadRawBtn) downloadRawBtn.addEventListener("click", () => downloadTextFile("uniscrape_raw_html.txt", debugState.rawHtml));
@@ -251,6 +259,9 @@ async function runScrape() {
 
   debugState.finalExtractionMarkdown = extractionMarkdown;
   debugState.markdown = extractionMarkdown;
+  if (!debugState.apiDiscovery.finalSource) {
+    debugState.apiDiscovery.finalSource = finalSource;
+  }
 
   if (isDebugMode()) {
     renderDebugPanel();
@@ -987,8 +998,64 @@ function resetDebugState() {
   };
 }
 
+function isDebugMenuVisible() {
+  return debugUiVisible;
+}
+
+function loadDebugUiVisibility() {
+  debugUiVisible = localStorage.getItem("uniscrape_debug_visible") === "1";
+  applyDebugUiVisibility();
+}
+
+function applyDebugUiVisibility() {
+  debugOptionsEl?.classList.toggle("debug-options--visible", debugUiVisible);
+  if (!debugUiVisible) hideDebugPanel();
+}
+
+function toggleDebugUiVisibility() {
+  debugUiVisible = !debugUiVisible;
+  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
+  applyDebugUiVisibility();
+  if (debugUiVisible && isDebugMode() && debugState.rawHtml) renderDebugPanel();
+}
+
+function initDebugKeyboardShortcut() {
+  const SEQ_WINDOW_MS = 1500;
+  const matchesStep = (e, step) => {
+    if (step === 0) return e.key === "Shift";
+    if (step === 1) return e.key.toLowerCase() === "d";
+    if (step === 2) return e.key.toLowerCase() === "b";
+    return false;
+  };
+
+  document.addEventListener("keydown", e => {
+    if (e.target.closest("input, textarea, select")) return;
+    if (e.repeat) return;
+
+    const now = Date.now();
+    if (debugKeySeqIndex > 0 && now - debugKeySeqAt > SEQ_WINDOW_MS) {
+      debugKeySeqIndex = 0;
+    }
+
+    if (!matchesStep(e, debugKeySeqIndex)) {
+      debugKeySeqIndex = matchesStep(e, 0) ? 1 : 0;
+      debugKeySeqAt = now;
+      return;
+    }
+
+    debugKeySeqAt = now;
+    debugKeySeqIndex++;
+
+    if (debugKeySeqIndex >= 3) {
+      debugKeySeqIndex = 0;
+      e.preventDefault();
+      toggleDebugUiVisibility();
+    }
+  });
+}
+
 function isDebugMode() {
-  return Boolean(debugModeInput?.checked);
+  return debugUiVisible && Boolean(debugModeInput?.checked);
 }
 
 function debugLog(...args) {

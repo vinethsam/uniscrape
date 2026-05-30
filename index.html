@@ -8,7 +8,9 @@
   <style>
     .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
     .error-retry-btn { align-self: flex-start; }
-    .debug-options { display: flex; flex-wrap: wrap; gap: 1.25rem 2rem; align-items: flex-end; padding-top: 0.25rem; border-top: 1px solid var(--border, #2a2a2a); margin-top: 0.25rem; }
+    #debugOptions { display: none; flex-wrap: wrap; gap: 1.25rem 2rem; align-items: flex-end; padding-top: 0.25rem; border-top: 1px solid var(--border, #2a2a2a); margin-top: 0.25rem; }
+    #debugOptions.debug-options--visible { display: flex; }
+    .version-mark { color: var(--text-dim, #3a3a3a); font-size: 0.85em; }
     .debug-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--text-muted, #666); cursor: pointer; }
     .debug-check input { accent-color: var(--green, #4ec994); }
     .content-mode-group { min-width: 160px; }
@@ -76,7 +78,7 @@
         </div>
       </div>
 
-      <div class="debug-options">
+      <div id="debugOptions" class="debug-options">
         <label class="debug-check">
           <input type="checkbox" id="debugMode" />
           Debug mode — save raw and cleaned content
@@ -224,7 +226,7 @@
   </main>
 
   <footer>
-    <p>Data sourced exclusively from official university websites. UniScrape v2.3.1</p>
+    <p>Data sourced exclusively from official university websites. <span class="version-mark">v2.3.1</span></p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js"></script>
