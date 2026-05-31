@@ -8,6 +8,7 @@
    - Retry button on errors; status shows approximate payload character count
    - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
    - Hidden API/data endpoint discovery when static markdown is weak
+   - Playwright render backend fallback for JS-rendered program listings
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -17,6 +18,7 @@ const MAX_API_CANDIDATES      = 12;
 const API_DISCOVERY_TIMEOUT_MS = 12000;
 const MAX_API_RESPONSE_CHARS  = 120000;
 const WORKER_URL         = "https://uniscrape-proxy.itsvineth05.workers.dev";
+const RENDER_API_URL    = "https://api.uniscrape.com/render";
 // Alternative if API rejects the model id: "claude-sonnet-4-20250514"
 const ANTHROPIC_MODEL    = "claude-sonnet-4-5";
 const GEMINI_MODEL    = "gemini-1.5-pro-latest";
@@ -47,6 +49,19 @@ let debugState = {
     selectedResponse: "",
     selectedMarkdown: "",
     finalSource: "",
+  },
+  renderApi: {
+    attempted: false,
+    success: false,
+    finalSource: "",
+    stats: null,
+    warnings: [],
+    programLinks: [],
+    links: [],
+    responseText: "",
+    responseHtml: "",
+    selectedMarkdown: "",
+    error: "",
   },
 };
 
@@ -171,7 +186,7 @@ if (downloadRawBtn) downloadRawBtn.addEventListener("click", () => downloadTextF
 if (downloadSelectedBtn) downloadSelectedBtn.addEventListener("click", () => downloadTextFile("uniscrape_selected_html.txt", debugState.selectedHtml));
 if (downloadMarkdownBtn) downloadMarkdownBtn.addEventListener("click", () => downloadTextFile("uniscrape_markdown.txt", debugState.markdown));
 if (downloadPreviewBtn) downloadPreviewBtn.addEventListener("click", () => downloadTextFile("uniscrape_extraction_preview.txt", debugState.extractionPreview));
-if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () => downloadTextFile("uniscrape_api_response.txt", debugState.apiDiscovery.selectedResponse));
+if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () => downloadTextFile("uniscrape_api_response.txt", debugState.apiDiscovery.selectedResponse || debugState.renderApi.responseHtml || debugState.renderApi.responseText));
 if (downloadFinalMdBtn) downloadFinalMdBtn.addEventListener("click", () => downloadTextFile("uniscrape_final_extraction_markdown.txt", debugState.finalExtractionMarkdown || debugState.markdown));
 if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
@@ -252,8 +267,17 @@ async function runScrape() {
       finalSource = apiResult.finalSource;
       debugState.apiDiscovery.finalSource = finalSource;
     } else {
-      showStatus("No hidden course data found.", 48);
-      debugState.apiDiscovery.finalSource = "failed - likely rendered";
+      showStatus("No hidden course data found. Rendering page with backend...", 52);
+      debugState.apiDiscovery.finalSource = "failed - trying rendered backend";
+
+      const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
+      if (renderResult?.markdown) {
+        extractionMarkdown = renderResult.markdown;
+        finalSource = renderResult.finalSource;
+      } else {
+        showStatus("Rendered backend did not return usable program content.", 54);
+        debugState.apiDiscovery.finalSource = "failed - likely deeper rendering/pagination needed";
+      }
     }
   }
 
@@ -261,6 +285,9 @@ async function runScrape() {
   debugState.markdown = extractionMarkdown;
   if (!debugState.apiDiscovery.finalSource) {
     debugState.apiDiscovery.finalSource = finalSource;
+  }
+  if (debugState.renderApi.attempted && debugState.renderApi.success) {
+    debugState.renderApi.finalSource = finalSource;
   }
 
   if (isDebugMode()) {
@@ -275,14 +302,15 @@ async function runScrape() {
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
     return showError(
-      "No program list was found in the static HTML or hidden data endpoints. This page probably loads courses with JavaScript after the page renders. UniScrape will need rendered fetching later, such as Playwright on a backend. Try a direct program page for now, or inspect Debug downloads."
+      "No usable program list was found from static fetch, hidden data endpoints, or rendered backend. This page may require deeper pagination, filters, or load-more handling. Try a direct program page, or inspect Debug downloads."
     );
   }
 
   debugState.extractionPreview = buildExtractionPreview(extractionMarkdown, url, provider);
 
   const providerLabel = provider === "anthropic" ? "Anthropic" : "Gemini";
-  showStatus(`Sending ~${extractionMarkdown.length.toLocaleString()} characters to ${providerLabel}...`, 55);
+  const sourceNote = finalSource && finalSource !== "static markdown" ? ` from ${finalSource}` : "";
+  showStatus(`Sending ~${extractionMarkdown.length.toLocaleString()} characters to ${providerLabel}${sourceNote}...`, 55);
 
   let programs;
   try {
@@ -330,6 +358,126 @@ async function fetchWithWorker(url, timeoutMs = 25000) {
   if (!res.ok) throw new Error(data?.error ?? "Worker returned HTTP " + res.status);
   if (!data?.contents || typeof data.contents !== "string") throw new Error("Unexpected response from worker.");
   return data.contents;
+}
+
+async function fetchWithRenderApi(url) {
+  let res;
+  try {
+    res = await fetch(RENDER_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(45000),
+    });
+  } catch (e) {
+    throw new Error("Could not reach render backend: " + e.message);
+  }
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.error || "Render API failed with HTTP " + res.status);
+  }
+  if (!data || typeof data !== "object") throw new Error("Render API returned an empty response.");
+  if (!data.html && !data.text && !Array.isArray(data.programLinks)) {
+    throw new Error("Render API returned no usable rendered content.");
+  }
+  return data;
+}
+
+function renderLinksToMarkdown(links, title) {
+  if (!Array.isArray(links) || !links.length) return "";
+  const lines = [`# ${title}`, ""];
+  const seen = new Set();
+  for (const link of links) {
+    if (!link) continue;
+    const text = String(link.text || link.title || link.href || "").trim();
+    const href = String(link.href || "").trim();
+    const key = (text + "|" + href).toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    if (href) lines.push(`- [${text}](${href})`);
+    else lines.push(`- ${text}`);
+    if (lines.length > 450) break;
+  }
+  return lines.length > 2 ? lines.join("\n") : "";
+}
+
+function buildMarkdownFromRenderData(data, sourceUrl) {
+  const parts = [];
+  parts.push(`# Playwright-rendered page data\n\nSource: ${sourceUrl}\n`);
+
+  const programLinksMd = renderLinksToMarkdown(data.programLinks, "Likely Program Links");
+  if (programLinksMd) parts.push(programLinksMd);
+
+  const linksMd = renderLinksToMarkdown(data.links, "All Rendered Page Links");
+  if (linksMd && (!programLinksMd || (data.programLinks || []).length < 10)) {
+    parts.push(linksMd);
+  }
+
+  if (data.text && String(data.text).trim()) {
+    parts.push("# Rendered Visible Page Text\n");
+    parts.push(String(data.text).trim().slice(0, 45000));
+  }
+
+  if (data.html && String(data.html).trim()) {
+    try {
+      const renderedMarkdown = cleanHtml(String(data.html), { forceRoot: "body", minimalClean: true }).markdown;
+      if (renderedMarkdown && renderedMarkdown.length > 200) {
+        parts.push("# Rendered HTML Converted to Markdown\n");
+        parts.push(renderedMarkdown);
+      }
+    } catch (e) {
+      debugLog("Could not convert rendered HTML to markdown:", e.message);
+    }
+  }
+
+  let markdown = parts.filter(Boolean).join("\n\n").replace(/\n{4,}/g, "\n\n").trim();
+  if (markdown.length > MAX_HTML_CHARS) {
+    markdown = markdown.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
+  }
+  return markdown;
+}
+
+async function tryRenderBackendFallback(pageUrl, staticMarkdown = "") {
+  debugState.renderApi.attempted = true;
+  debugState.renderApi.success = false;
+  debugState.renderApi.error = "";
+
+  showStatus("Rendering JavaScript page with Playwright backend...", 55);
+  try {
+    const data = await fetchWithRenderApi(pageUrl);
+    debugState.renderApi.success = true;
+    debugState.renderApi.stats = data.stats || null;
+    debugState.renderApi.warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    debugState.renderApi.programLinks = Array.isArray(data.programLinks) ? data.programLinks : [];
+    debugState.renderApi.links = Array.isArray(data.links) ? data.links : [];
+    debugState.renderApi.responseText = data.text || "";
+    debugState.renderApi.responseHtml = data.html || "";
+
+    const renderMarkdown = buildMarkdownFromRenderData(data, pageUrl);
+    debugState.renderApi.selectedMarkdown = renderMarkdown;
+
+    if (!renderMarkdown || isWeakProgramMarkdown(renderMarkdown)) {
+      debugState.renderApi.error = "Render backend returned weak markdown.";
+      return null;
+    }
+
+    const finalMarkdown = mergeRenderedMarkdown(staticMarkdown, renderMarkdown);
+    debugState.finalExtractionMarkdown = finalMarkdown;
+    debugState.markdown = finalMarkdown;
+    return { markdown: finalMarkdown, finalSource: "playwright-rendered backend" };
+  } catch (e) {
+    debugState.renderApi.error = e.message;
+    if (isDebugMode()) debugLog("Render backend failed:", e.message);
+    return null;
+  }
+}
+
+function mergeRenderedMarkdown(staticMd, renderMd) {
+  if (!renderMd) return staticMd;
+  if (!staticMd || isWeakProgramMarkdown(staticMd)) return capExtractionMarkdown(renderMd);
+  const snippet = staticMd.slice(0, 3000);
+  return capExtractionMarkdown(`${renderMd}\n\n# Original static page context\n\n${snippet}`);
 }
 
 //Hidden API / embedded data discovery
@@ -649,15 +797,16 @@ function apiResponseToMarkdown(text, analysis, sourceUrl) {
 function capExtractionMarkdown(md) {
   if (md.length <= MAX_HTML_CHARS) return md;
   const apiMarker = "# API-discovered";
-  const idx = md.indexOf(apiMarker);
+  const renderMarker = "# Playwright-rendered";
+  const idx = md.indexOf(apiMarker) >= 0 ? md.indexOf(apiMarker) : md.indexOf(renderMarker);
   if (idx >= 0) {
-    const apiPart = md.slice(idx);
-    if (apiPart.length >= MAX_HTML_CHARS - 500) {
-      return apiPart.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
+    const priorityPart = md.slice(idx);
+    if (priorityPart.length >= MAX_HTML_CHARS - 500) {
+      return priorityPart.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
     }
-    const room = MAX_HTML_CHARS - apiPart.length - 80;
+    const room = MAX_HTML_CHARS - priorityPart.length - 80;
     const prefix = md.slice(0, Math.max(0, room));
-    return apiPart + "\n\n# Original page context\n\n" + prefix + "\n\n[...truncated...]";
+    return priorityPart + "\n\n# Original page context\n\n" + prefix + "\n\n[...truncated...]";
   }
   return md.slice(0, MAX_HTML_CHARS) + "\n\n[...truncated...]";
 }
@@ -749,6 +898,8 @@ If the page is a listing page, extract every visible academic program from the l
 Do not reject a listing page simply because fees, IELTS, or descriptions are missing. Extract the programs that are visible and leave missing fields blank.
 
 The provided markdown may include API-discovered program data converted into markdown. Treat this as official page data if it came from the same university domain. Extract visible program records even if many details are missing.
+
+The provided markdown may include Playwright-rendered content from the official university page. It may include sections titled "Likely Program Links", "Rendered Visible Page Text", or "Rendered HTML Converted to Markdown". Treat these as official rendered page content. If likely program links are present, extract each genuine academic program link as a program record even if detailed fees/admissions fields are blank.
 
 Return ONLY a valid JSON array. No markdown fences, no explanation, no preamble - just the raw JSON array starting with [ and ending with ].
 
@@ -995,6 +1146,19 @@ function resetDebugState() {
     selectedResponse: "",
     selectedMarkdown: "",
     finalSource: "",
+  };
+  debugState.renderApi = {
+    attempted: false,
+    success: false,
+    finalSource: "",
+    stats: null,
+    warnings: [],
+    programLinks: [],
+    links: [],
+    responseText: "",
+    responseHtml: "",
+    selectedMarkdown: "",
+    error: "",
   };
 }
 
@@ -1390,13 +1554,14 @@ function renderDebugPanel() {
 
   const s = debugState.stats;
   const ad = debugState.apiDiscovery;
+  const rd = debugState.renderApi;
   debugStatsEl.innerHTML = [
     `<div><span class="debug-k">Raw HTML</span> ${s.rawHtmlLength?.toLocaleString() ?? 0} chars</div>`,
     `<div><span class="debug-k">Selected HTML</span> ${s.selectedHtmlLength?.toLocaleString() ?? 0} chars</div>`,
     `<div><span class="debug-k">Static markdown</span> ${(debugState.staticMarkdown || "").length.toLocaleString()} chars</div>`,
     `<div><span class="debug-k">Final extraction markdown</span> ${(debugState.finalExtractionMarkdown || debugState.markdown || "").length.toLocaleString()} chars</div>`,
     `<div><span class="debug-k">Root strategy</span> ${esc(debugState.rootStrategy || "—")}</div>`,
-    `<div><span class="debug-k">Final content source</span> ${esc(ad.finalSource || (ad.attempted ? "static markdown" : "—"))}</div>`,
+    `<div><span class="debug-k">Final content source</span> ${esc(ad.finalSource || rd.finalSource || (ad.attempted ? "static markdown" : "—"))}</div>`,
     `<div><span class="debug-k">Program keywords</span> ${s.positiveKeywordHits ?? 0} hits ${s.hasProgramKeywords ? "(detected)" : "(weak)"}</div>`,
     `<div><span class="debug-k">Markdown links</span> ${s.linkCount ?? 0}</div>`,
     `<div><span class="debug-k">JS shell suspected</span> ${s.suspectedJsShell ? "yes" : "no"}</div>`,
@@ -1407,17 +1572,28 @@ function renderDebugPanel() {
     ad.selected ? `<div><span class="debug-k">Selected API URL</span> ${esc(ad.selected.url || "embedded")}</div>` : "",
     ad.selected ? `<div><span class="debug-k">Selected reason</span> ${esc(ad.selected.reason || "—")}</div>` : "",
     ad.selected ? `<div><span class="debug-k">API response score</span> ${ad.selected.score ?? "—"}</div>` : "",
+    `<div><span class="debug-k">Render backend attempted</span> ${rd.attempted ? "Yes" : "No"}</div>`,
+    `<div><span class="debug-k">Render backend success</span> ${rd.success ? "Yes" : "No"}</div>`,
+    rd.stats ? `<div><span class="debug-k">Render text length</span> ${rd.stats.textLength?.toLocaleString?.() ?? rd.stats.textLength ?? "—"}</div>` : "",
+    rd.stats ? `<div><span class="debug-k">Render links</span> ${rd.stats.linkCount ?? "—"}</div>` : "",
+    rd.stats ? `<div><span class="debug-k">Render program links</span> ${rd.stats.programLinkCount ?? "—"}</div>` : "",
+    rd.error ? `<div><span class="debug-k">Render error</span> ${esc(rd.error)}</div>` : "",
   ].filter(Boolean).join("");
 
-  if (debugState.warnings.length && debugWarningsEl) {
-    debugWarningsEl.innerHTML = debugState.warnings.map(w => `<li>${esc(w)}</li>`).join("");
+  const warnings = [...debugState.warnings];
+  if (Array.isArray(rd.warnings) && rd.warnings.length) {
+    warnings.push(...rd.warnings.map(w => "Render backend: " + w));
+  }
+
+  if (warnings.length && debugWarningsEl) {
+    debugWarningsEl.innerHTML = warnings.map(w => `<li>${esc(w)}</li>`).join("");
     debugWarningsBlock?.classList.remove("hidden");
   } else if (debugWarningsEl) {
     debugWarningsEl.innerHTML = "";
     debugWarningsBlock?.classList.add("hidden");
   }
 
-  const hasApi = Boolean(debugState.apiDiscovery.selectedResponse);
+  const hasApi = Boolean(debugState.apiDiscovery.selectedResponse || rd.responseHtml || rd.responseText);
   downloadApiResponseBtn?.classList.toggle("hidden", !hasApi);
   downloadFinalMdBtn?.classList.toggle("hidden", !(debugState.finalExtractionMarkdown || debugState.markdown));
 
@@ -1705,7 +1881,6 @@ clearBtn.addEventListener("click", () => {
   hideResults();
   clearError();
   hideDebugPanel();
-  resetDebugState();
   [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => el.value = "");
 });
 
