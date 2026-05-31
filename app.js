@@ -9,6 +9,7 @@
    - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
    - Hidden API/data endpoint discovery when static markdown is weak
    - Playwright render backend fallback for JS-rendered program listings
+   - Debug mode now acts as a dry-run: prepare/download markdown but skip Claude/Gemini extraction
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -216,6 +217,7 @@ async function runScrape() {
   const url      = urlInput.value.trim();
   const apiKey   = apiKeyInput.value.trim();
   const provider = apiProvider.value;
+  const debugOnly = isDebugMode();
 
   resetDebugState();
   clearError();
@@ -223,7 +225,7 @@ async function runScrape() {
   hideDebugPanel();
 
   if (!url)    return showError("Please enter a URL.");
-  if (!apiKey) return showError("Please enter your API key.");
+  if (!apiKey && !debugOnly) return showError("Please enter your API key.");
   try { new URL(url); } catch { return showError("That does not look like a valid URL."); }
 
   scrapeBtn.disabled = true;
@@ -308,6 +310,13 @@ async function runScrape() {
 
   debugState.extractionPreview = buildExtractionPreview(extractionMarkdown, url, provider);
 
+  if (debugOnly) {
+    renderDebugPanel();
+    scrapeBtn.disabled = false;
+    showStatus("Debug mode active — markdown prepared. API extraction skipped.", 100);
+    return;
+  }
+
   const providerLabel = provider === "anthropic" ? "Anthropic" : "Gemini";
   const sourceNote = finalSource && finalSource !== "static markdown" ? ` from ${finalSource}` : "";
   showStatus(`Sending ~${extractionMarkdown.length.toLocaleString()} characters to ${providerLabel}${sourceNote}...`, 55);
@@ -319,11 +328,13 @@ async function runScrape() {
       : await extractWithGemini(extractionMarkdown, url, apiKey);
   } catch (e) {
     scrapeBtn.disabled = false;
+    if (isDebugMode()) renderDebugPanel();
     return showError("Extraction failed: " + e.message);
   }
 
   if (!programs.length) {
     scrapeBtn.disabled = false;
+    if (isDebugMode()) renderDebugPanel();
     return showError(
       "No programs were extracted. The cleaned markdown may not contain the actual program listing, or the page may load programs dynamically with JavaScript. Enable Debug mode and inspect the Markdown download."
     );
@@ -1167,20 +1178,27 @@ function isDebugMenuVisible() {
 }
 
 function loadDebugUiVisibility() {
-  debugUiVisible = localStorage.getItem("uniscrape_debug_visible") === "1";
+  // Debug controls should always be visible now.
+  // The checkbox controls whether debug/dry-run mode is active.
+  debugUiVisible = true;
+  localStorage.setItem("uniscrape_debug_visible", "1");
   applyDebugUiVisibility();
 }
 
 function applyDebugUiVisibility() {
-  debugOptionsEl?.classList.toggle("debug-options--visible", debugUiVisible);
-  if (!debugUiVisible) hideDebugPanel();
+  if (!debugOptionsEl) return;
+  debugOptionsEl.classList.add("debug-options--visible");
 }
 
 function toggleDebugUiVisibility() {
-  debugUiVisible = !debugUiVisible;
-  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
+  // Keep the old keyboard shortcut harmless. It now only reveals the controls.
+  debugUiVisible = true;
+  localStorage.setItem("uniscrape_debug_visible", "1");
   applyDebugUiVisibility();
-  if (debugUiVisible && isDebugMode() && debugState.rawHtml) renderDebugPanel();
+
+  if (isDebugMode() && debugState.rawHtml) {
+    renderDebugPanel();
+  }
 }
 
 function initDebugKeyboardShortcut() {
@@ -1219,7 +1237,7 @@ function initDebugKeyboardShortcut() {
 }
 
 function isDebugMode() {
-  return debugUiVisible && Boolean(debugModeInput?.checked);
+  return Boolean(debugModeInput?.checked);
 }
 
 function debugLog(...args) {
