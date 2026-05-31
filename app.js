@@ -1,15 +1,5 @@
 /*
    UniScrape v2.3.1 - app.js
-   Supports Anthropic and Google Gemini APIs.
-   Proxy: https://uniscrape-proxy.itsvineth05.workers.dev
-   Changes from v2.3:
-   - MAX_HTML_CHARS (80,000) applies to cleaned markdown sent to the API
-   - cleanHtml() extracts main content, strips chrome, converts to markdown via Turndown
-   - Retry button on errors; status shows approximate payload character count
-   - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
-   - Hidden API/data endpoint discovery when static markdown is weak
-   - Playwright render backend fallback for JS-rendered program listings
-   - Debug mode now acts as a dry-run: prepare/download markdown but skip Claude/Gemini extraction
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -50,6 +40,7 @@ let debugState = {
     selectedResponse: "",
     selectedMarkdown: "",
     finalSource: "",
+    apiIsStrong: false,
   },
   renderApi: {
     attempted: false,
@@ -271,18 +262,27 @@ async function runScrape() {
       debugState.apiDiscovery.finalSource = finalSource;
 
       const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
+      debugState.apiDiscovery.apiIsStrong = apiIsStrong;
 
-      if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
-        showStatus("API result looks weak. Rendering page with backend...", 52);
+      // Important:
+      // API discovery can produce false positives on JS-rendered search pages.
+      // If the static Worker result already looks like a JS shell, always try the
+      // Playwright render backend as well. A weak API result must not block render.
+      if (shouldUseRenderFallback(staticMarkdown)) {
+        showStatus("Render fallback required. Rendering page with backend...", 52);
 
         const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
 
         if (renderResult?.markdown) {
           extractionMarkdown = renderResult.markdown;
           finalSource = renderResult.finalSource;
-          debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
+          debugState.apiDiscovery.finalSource = apiIsStrong
+            ? "api found - render backend preferred due JS shell"
+            : "api weak - used rendered backend";
         } else {
-          debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
+          debugState.apiDiscovery.finalSource = apiIsStrong
+            ? "api used - render backend failed or weak"
+            : "api weak - render backend failed or weak";
         }
       }
     } else {
@@ -1213,6 +1213,7 @@ function resetDebugState() {
     selectedResponse: "",
     selectedMarkdown: "",
     finalSource: "",
+    apiIsStrong: false,
   };
   debugState.renderApi = {
     attempted: false,
@@ -1663,6 +1664,7 @@ function renderDebugPanel() {
     ad.selected ? `<div><span class="debug-k">Selected API URL</span> ${esc(ad.selected.url || "embedded")}</div>` : "",
     ad.selected ? `<div><span class="debug-k">Selected reason</span> ${esc(ad.selected.reason || "—")}</div>` : "",
     ad.selected ? `<div><span class="debug-k">API response score</span> ${ad.selected.score ?? "—"}</div>` : "",
+    ad.attempted ? `<div><span class="debug-k">API strong evidence</span> ${ad.apiIsStrong ? "yes" : "no"}</div>` : "",
     `<div><span class="debug-k">Render backend attempted</span> ${rd.attempted ? "Yes" : "No"}</div>`,
     `<div><span class="debug-k">Render backend success</span> ${rd.success ? "Yes" : "No"}</div>`,
     rd.stats ? `<div><span class="debug-k">Render text length</span> ${rd.stats.textLength?.toLocaleString?.() ?? rd.stats.textLength ?? "—"}</div>` : "",
