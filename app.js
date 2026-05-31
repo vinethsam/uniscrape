@@ -1,5 +1,5 @@
 /*
-   UniScrape v2.3.1 - app.js
+   UniScrape v3.1 - app.js
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -52,6 +52,7 @@ let debugState = {
     links: [],
     responseText: "",
     responseHtml: "",
+    capturedApis: [],
     selectedMarkdown: "",
     error: "",
   },
@@ -264,25 +265,19 @@ async function runScrape() {
       const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
       debugState.apiDiscovery.apiIsStrong = apiIsStrong;
 
-      // Important:
-      // API discovery can produce false positives on JS-rendered search pages.
-      // If the static Worker result already looks like a JS shell, always try the
-      // Playwright render backend as well. A weak API result must not block render.
-      if (shouldUseRenderFallback(staticMarkdown)) {
-        showStatus("Render fallback required. Rendering page with backend...", 52);
+      // Only spend time/money on Playwright if the API discovery result is weak.
+      // Strong API data is usually cheaper and cleaner than rendered HTML.
+      if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
+        showStatus("API result looks weak. Rendering page with backend...", 52);
 
         const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
 
         if (renderResult?.markdown) {
           extractionMarkdown = renderResult.markdown;
           finalSource = renderResult.finalSource;
-          debugState.apiDiscovery.finalSource = apiIsStrong
-            ? "api found - render backend preferred due JS shell"
-            : "api weak - used rendered backend";
+          debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
         } else {
-          debugState.apiDiscovery.finalSource = apiIsStrong
-            ? "api used - render backend failed or weak"
-            : "api weak - render backend failed or weak";
+          debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
         }
       }
     } else {
@@ -412,7 +407,7 @@ async function fetchWithRenderApi(url) {
     throw new Error(data?.detail || data?.error || "Render API failed with HTTP " + res.status);
   }
   if (!data || typeof data !== "object") throw new Error("Render API returned an empty response.");
-  if (!data.html && !data.text && !Array.isArray(data.programLinks)) {
+  if (!data.html && !data.text && !Array.isArray(data.programLinks) && !Array.isArray(data.capturedApis)) {
     throw new Error("Render API returned no usable rendered content.");
   }
   return data;
@@ -436,9 +431,111 @@ function renderLinksToMarkdown(links, title) {
   return lines.length > 2 ? lines.join("\n") : "";
 }
 
+function normaliseCapturedApiBody(api) {
+  if (!api || typeof api !== "object") return "";
+
+  const candidates = [
+    api.markdown,
+    api.extractedMarkdown,
+    api.programMarkdown,
+    api.body,
+    api.bodyPreview,
+    api.responseBody,
+    api.responseText,
+    api.text,
+    api.preview,
+    api.data,
+    api.json,
+    api.records,
+    api.programs,
+    api.items,
+  ];
+
+  for (const value of candidates) {
+    if (value == null) continue;
+    if (typeof value === "string" && value.trim()) return value.trim();
+    try {
+      const json = JSON.stringify(value, null, 2);
+      if (json && json !== "null" && json !== "[]" && json !== "{}") return json;
+    } catch {
+      /* ignore unserialisable values */
+    }
+  }
+
+  try {
+    return JSON.stringify(api, null, 2);
+  } catch {
+    return "";
+  }
+}
+
+function scoreCapturedApi(api) {
+  const body = normaliseCapturedApiBody(api);
+  const url = String(api?.url || api?.endpoint || api?.requestUrl || "");
+  const blob = `${url}
+${body}`;
+  let score = 0;
+  score += countKeywords(blob, POSITIVE_KEYWORDS) * 10;
+  score += countLikelyProgramMarkdownLinks(body) * 8;
+  score += ((blob.toLowerCase().match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|undergraduate|postgraduate)/g) || []).length * 8);
+  if (/course|programme|program|study|search|api|json/i.test(url)) score += 25;
+  if (/cookie|analytics|tracking|tagmanager|facebook|hotjar/i.test(url)) score -= 50;
+  return score;
+}
+
+function capturedApisToMarkdown(capturedApis, sourceUrl) {
+  if (!Array.isArray(capturedApis) || !capturedApis.length) return "";
+
+  const useful = capturedApis
+    .map((api, index) => ({ api, index, score: scoreCapturedApi(api) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
+  if (!useful.length) return "";
+
+  const lines = [
+    "# Captured Network/API Course Data",
+    "",
+    `Source page: ${sourceUrl}`,
+    "",
+    "These are JSON/text responses captured by the Playwright backend while the page was loading. Treat these as the highest-priority source when they contain programme/course records.",
+    "",
+  ];
+
+  useful.forEach(({ api, score }, i) => {
+    const url = api?.url || api?.endpoint || api?.requestUrl || "";
+    const method = api?.method ? ` ${api.method}` : "";
+    const status = api?.status ? ` status=${api.status}` : "";
+    const contentType = api?.contentType || api?.type || "";
+    let body = normaliseCapturedApiBody(api);
+
+    if (body.length > 18000) body = body.slice(0, 18000) + "
+[...captured API truncated...]";
+
+    lines.push(`## Captured API ${i + 1}`);
+    lines.push(`Score: ${score}`);
+    if (url) lines.push(`URL: ${url}`);
+    if (method || status || contentType) lines.push(`Meta:${method}${status}${contentType ? ` contentType=${contentType}` : ""}`);
+    lines.push("```json");
+    lines.push(body);
+    lines.push("```");
+    lines.push("");
+  });
+
+  return lines.join("
+").trim();
+}
+
 function buildMarkdownFromRenderData(data, sourceUrl) {
   const parts = [];
-  parts.push(`# Playwright-rendered page data\n\nSource: ${sourceUrl}\n`);
+  parts.push(`# Playwright-rendered page data
+
+Source: ${sourceUrl}
+`);
+
+  const capturedApisMd = capturedApisToMarkdown(data.capturedApis, sourceUrl);
+  if (capturedApisMd) parts.push(capturedApisMd);
 
   const programLinksMd = renderLinksToMarkdown(data.programLinks, "Likely Program Links");
   if (programLinksMd) parts.push(programLinksMd);
@@ -485,6 +582,7 @@ async function tryRenderBackendFallback(pageUrl, staticMarkdown = "") {
     debugState.renderApi.warnings = Array.isArray(data.warnings) ? data.warnings : [];
     debugState.renderApi.programLinks = Array.isArray(data.programLinks) ? data.programLinks : [];
     debugState.renderApi.links = Array.isArray(data.links) ? data.links : [];
+    debugState.renderApi.capturedApis = Array.isArray(data.capturedApis) ? data.capturedApis : [];
     debugState.renderApi.responseText = data.text || "";
     debugState.renderApi.responseHtml = data.html || "";
 
@@ -1670,6 +1768,7 @@ function renderDebugPanel() {
     rd.stats ? `<div><span class="debug-k">Render text length</span> ${rd.stats.textLength?.toLocaleString?.() ?? rd.stats.textLength ?? "—"}</div>` : "",
     rd.stats ? `<div><span class="debug-k">Render links</span> ${rd.stats.linkCount ?? "—"}</div>` : "",
     rd.stats ? `<div><span class="debug-k">Render program links</span> ${rd.stats.programLinkCount ?? "—"}</div>` : "",
+    `<div><span class="debug-k">Captured APIs</span> ${rd.capturedApis?.length ?? 0}</div>`,
     rd.stats?.programCardCount !== undefined ? `<div><span class="debug-k">Render program cards</span> ${rd.stats.programCardCount}</div>` : "",
     rd.stats?.htmlLength !== undefined ? `<div><span class="debug-k">Rendered HTML</span> ${rd.stats.htmlLength.toLocaleString()} chars</div>` : "",
     rd.stats?.renderTimeMs !== undefined ? `<div><span class="debug-k">Render time</span> ${rd.stats.renderTimeMs.toLocaleString()} ms</div>` : "",
@@ -1966,7 +2065,7 @@ exportBtn.addEventListener("click", () => {
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const a    = document.createElement("a");
   a.href     = URL.createObjectURL(blob);
-  a.download = `uniscrape-v2.3_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `uniscrape-v3.1_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 });
 
