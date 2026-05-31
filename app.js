@@ -2,14 +2,6 @@
    UniScrape v2.3.1 - app.js
    Supports Anthropic and Google Gemini APIs.
    Proxy: https://uniscrape-proxy.itsvineth05.workers.dev
-   Changes from v2.3:
-   - MAX_HTML_CHARS (80,000) applies to cleaned markdown sent to the API
-   - cleanHtml() extracts main content, strips chrome, converts to markdown via Turndown
-   - Retry button on errors; status shows approximate payload character count
-   - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
-   - Hidden API/data endpoint discovery when static markdown is weak
-   - Playwright render backend fallback for JS-rendered program listings
-   - Debug mode now acts as a dry-run: prepare/download markdown but skip Claude/Gemini extraction
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -260,7 +252,7 @@ async function runScrape() {
   let extractionMarkdown = staticMarkdown;
   let finalSource = "static markdown";
 
-  if (isWeakProgramMarkdown(staticMarkdown)) {
+  if (shouldUseRenderFallback(staticMarkdown)) {
     showStatus("No visible program list found. Searching for hidden course data...", 45);
     const apiResult = await tryApiDiscoveryFallback(html, url);
     if (apiResult?.markdown) {
@@ -314,6 +306,11 @@ async function runScrape() {
     renderDebugPanel();
     scrapeBtn.disabled = false;
     showStatus("Debug mode active — markdown prepared. API extraction skipped.", 100);
+
+    setTimeout(() => {
+      hideStatus();
+    }, 1200);
+
     return;
   }
 
@@ -1178,25 +1175,26 @@ function isDebugMenuVisible() {
 }
 
 function loadDebugUiVisibility() {
-  // Debug controls should always be visible now.
-  // The checkbox controls whether debug/dry-run mode is active.
-  debugUiVisible = true;
-  localStorage.setItem("uniscrape_debug_visible", "1");
+  debugUiVisible = localStorage.getItem("uniscrape_debug_visible") === "1";
   applyDebugUiVisibility();
 }
 
 function applyDebugUiVisibility() {
   if (!debugOptionsEl) return;
-  debugOptionsEl.classList.add("debug-options--visible");
+
+  debugOptionsEl.classList.toggle("debug-options--visible", debugUiVisible);
+
+  if (!debugUiVisible) {
+    hideDebugPanel();
+  }
 }
 
 function toggleDebugUiVisibility() {
-  // Keep the old keyboard shortcut harmless. It now only reveals the controls.
-  debugUiVisible = true;
-  localStorage.setItem("uniscrape_debug_visible", "1");
+  debugUiVisible = !debugUiVisible;
+  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
   applyDebugUiVisibility();
 
-  if (isDebugMode() && debugState.rawHtml) {
+  if (debugUiVisible && isDebugMode() && debugState.rawHtml) {
     renderDebugPanel();
   }
 }
@@ -1238,6 +1236,21 @@ function initDebugKeyboardShortcut() {
 
 function isDebugMode() {
   return Boolean(debugModeInput?.checked);
+}
+
+function shouldUseRenderFallback(markdown) {
+  if (isWeakProgramMarkdown(markdown)) return true;
+
+  if (debugState.stats?.suspectedJsShell) return true;
+
+  const hasJsWarning = (debugState.warnings || []).some(w => {
+    const msg = String(w).toLowerCase();
+    return msg.includes("javascript") || msg.includes("worker fetch may not see");
+  });
+
+  if (hasJsWarning) return true;
+
+  return false;
 }
 
 function debugLog(...args) {
@@ -1583,6 +1596,7 @@ function renderDebugPanel() {
     `<div><span class="debug-k">Program keywords</span> ${s.positiveKeywordHits ?? 0} hits ${s.hasProgramKeywords ? "(detected)" : "(weak)"}</div>`,
     `<div><span class="debug-k">Markdown links</span> ${s.linkCount ?? 0}</div>`,
     `<div><span class="debug-k">JS shell suspected</span> ${s.suspectedJsShell ? "yes" : "no"}</div>`,
+    `<div><span class="debug-k">Render fallback trigger</span> ${shouldUseRenderFallback(debugState.staticMarkdown || debugState.markdown) ? "yes" : "no"}</div>`,
     `<div><span class="debug-k">API discovery attempted</span> ${ad.attempted ? "Yes" : "No"}</div>`,
     `<div><span class="debug-k">API candidates found</span> ${ad.candidates?.length ?? 0}</div>`,
     `<div><span class="debug-k">API candidates tried</span> ${ad.tried?.length ?? 0}</div>`,
@@ -1595,6 +1609,9 @@ function renderDebugPanel() {
     rd.stats ? `<div><span class="debug-k">Render text length</span> ${rd.stats.textLength?.toLocaleString?.() ?? rd.stats.textLength ?? "—"}</div>` : "",
     rd.stats ? `<div><span class="debug-k">Render links</span> ${rd.stats.linkCount ?? "—"}</div>` : "",
     rd.stats ? `<div><span class="debug-k">Render program links</span> ${rd.stats.programLinkCount ?? "—"}</div>` : "",
+    rd.stats?.programCardCount !== undefined ? `<div><span class="debug-k">Render program cards</span> ${rd.stats.programCardCount}</div>` : "",
+    rd.stats?.htmlLength !== undefined ? `<div><span class="debug-k">Rendered HTML</span> ${rd.stats.htmlLength.toLocaleString()} chars</div>` : "",
+    rd.stats?.renderTimeMs !== undefined ? `<div><span class="debug-k">Render time</span> ${rd.stats.renderTimeMs.toLocaleString()} ms</div>` : "",
     rd.error ? `<div><span class="debug-k">Render error</span> ${esc(rd.error)}</div>` : "",
   ].filter(Boolean).join("");
 
