@@ -44,6 +44,7 @@ header {
 .header-inner {
   display: flex;
   align-items: center;
+  gap: 1rem;
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
@@ -52,7 +53,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: .85rem;
+  gap: .75rem;
   min-width: 0;
 }
 .site-logo {
@@ -63,10 +64,9 @@ header {
 }
 .site-copy {
   display: flex;
-  flex-direction: row;
   align-items: baseline;
   justify-content: flex-start;
-  gap: .85rem;
+  gap: .75rem;
   min-width: 0;
   line-height: 1;
 }
@@ -84,15 +84,11 @@ header {
 }
 @media (max-width: 600px) {
   header { padding: 1rem 1.25rem; }
-  .site-brand { gap: .65rem; }
+  .site-brand { gap: .6rem; }
   .site-logo { width: 26px; height: 26px; }
-  .site-copy { gap: .65rem; }
+  .site-copy { gap: .6rem; }
   .site-title { font-size: 1rem; }
   .site-sub { font-size: .72rem; }
-}
-@media (max-width: 380px) {
-  .site-copy { gap: .5rem; }
-  .site-sub { font-size: .68rem; }
 }
 
 /* ---- Main --------------------------------------------------------- */
@@ -548,31 +544,4 @@ footer {
 }
 
 /* ---- Utility ------------------------------------------------------ */
-.hidden,
-[hidden] {
-  display: none !important;
-}
-
-/* Safety overrides: keep hidden panels and modal closed unless JS removes .hidden. */
-#debugPanel.hidden,
-#statusSection.hidden,
-#errorSection.hidden,
-#resultsSection.hidden,
-#noResults.hidden,
-#modal.hidden,
-.modal.hidden,
-.debug-api-only.hidden,
-#retryBtn.hidden {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
-/* Debug options should stay hidden unless app.js adds .debug-options--visible. */
-#debugOptions {
-  display: none;
-}
-#debugOptions.debug-options--visible {
-  display: flex;
-}
+.hidden { display: none !important; }
