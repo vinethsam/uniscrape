@@ -1,13 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#000000"/>
-  <text
-    x="50%"
-    y="51%"
-    text-anchor="middle"
-    dominant-baseline="middle"
-    font-family="'Tiny5', monospace"
-    font-size="30"
-    font-weight="400"
-    fill="#ffffff"
-  >U_</text>
+  <rect width="64" height="64" rx="16" fill="#050505"/>
+  <text x="50%" y="51%" text-anchor="middle" dominant-baseline="middle"
+        font-family="'JetBrains Mono', monospace"
+        font-size="40" font-weight="600">
+    <tspan fill="#ffffff">U</tspan><tspan fill="#4ec994">_</tspan>
+  </text>
 </svg>
