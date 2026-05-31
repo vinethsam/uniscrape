@@ -2,6 +2,14 @@
    UniScrape v2.3.1 - app.js
    Supports Anthropic and Google Gemini APIs.
    Proxy: https://uniscrape-proxy.itsvineth05.workers.dev
+   Changes from v2.3:
+   - MAX_HTML_CHARS (80,000) applies to cleaned markdown sent to the API
+   - cleanHtml() extracts main content, strips chrome, converts to markdown via Turndown
+   - Retry button on errors; status shows approximate payload character count
+   - Debug mode, scored content-root selection, markdown diagnostics, listing-page prompt
+   - Hidden API/data endpoint discovery when static markdown is weak
+   - Playwright render backend fallback for JS-rendered program listings
+   - Debug mode now acts as a dry-run: prepare/download markdown but skip Claude/Gemini extraction
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
@@ -256,15 +264,33 @@ async function runScrape() {
     showStatus("No visible program list found. Searching for hidden course data...", 45);
     const apiResult = await tryApiDiscoveryFallback(html, url);
     if (apiResult?.markdown) {
-      showStatus("Useful course data found. Preparing extraction content...", 50);
+      showStatus("Possible course data found. Checking quality...", 50);
+
       extractionMarkdown = apiResult.markdown;
       finalSource = apiResult.finalSource;
       debugState.apiDiscovery.finalSource = finalSource;
+
+      const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
+
+      if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
+        showStatus("API result looks weak. Rendering page with backend...", 52);
+
+        const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
+
+        if (renderResult?.markdown) {
+          extractionMarkdown = renderResult.markdown;
+          finalSource = renderResult.finalSource;
+          debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
+        } else {
+          debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
+        }
+      }
     } else {
       showStatus("No hidden course data found. Rendering page with backend...", 52);
       debugState.apiDiscovery.finalSource = "failed - trying rendered backend";
 
       const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
+
       if (renderResult?.markdown) {
         extractionMarkdown = renderResult.markdown;
         finalSource = renderResult.finalSource;
@@ -496,7 +522,7 @@ function isWeakProgramMarkdown(markdown) {
   const lower = markdown.toLowerCase();
   const weakPhraseHits = WEAK_MARKDOWN_PHRASES.filter(p => lower.includes(p)).length;
   const links = (markdown.match(/\[.*?\]\([^)]+\)/g) || []).length;
-  const degreeHits = (lower.match(/\b(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)\b/g) || []).length;
+  const degreeHits = (lower.match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)/g) || []).length;
 
   if (degreeHits >= 2 && countKeywords(markdown, POSITIVE_KEYWORDS) >= 2) return false;
   if (links >= 5 && countKeywords(markdown, POSITIVE_KEYWORDS) >= 3) return false;
@@ -507,6 +533,39 @@ function isWeakProgramMarkdown(markdown) {
   if (weakPhraseHits >= 3 && countKeywords(markdown, POSITIVE_KEYWORDS) < 3) return true;
 
   return false;
+}
+
+function countLikelyProgramMarkdownLinks(markdown) {
+  if (!markdown) return 0;
+
+  const linkMatches = markdown.match(/\[([^\]]+)\]\(([^)]+)\)/g) || [];
+
+  return linkMatches.filter(link => {
+    const lower = link.toLowerCase();
+    return /course|courses|programme|programmes|program|programs|undergraduate|postgraduate|degree|bsc|ba|beng|msc|ma|mba|phd|bachelor|master/.test(lower);
+  }).length;
+}
+
+function hasStrongProgramEvidence(markdown) {
+  if (!markdown) return false;
+
+  const lower = markdown.toLowerCase();
+
+  const degreeHits = (
+    lower.match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)/g) || []
+  ).length;
+
+  const programRecordHits = (
+    lower.match(/## program|name:|award\/level:|url:/g) || []
+  ).length;
+
+  const likelyProgramLinks = countLikelyProgramMarkdownLinks(markdown);
+
+  return (
+    likelyProgramLinks >= 5 ||
+    degreeHits >= 5 ||
+    programRecordHits >= 8
+  );
 }
 
 function isAllowedApiUrl(candidateUrl, pageUrl) {
