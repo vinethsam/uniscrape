@@ -179,7 +179,7 @@ if (downloadRawBtn) downloadRawBtn.addEventListener("click", () => downloadTextF
 if (downloadSelectedBtn) downloadSelectedBtn.addEventListener("click", () => downloadTextFile("uniscrape_selected_html.txt", debugState.selectedHtml));
 if (downloadMarkdownBtn) downloadMarkdownBtn.addEventListener("click", () => downloadTextFile("uniscrape_markdown.txt", debugState.markdown));
 if (downloadPreviewBtn) downloadPreviewBtn.addEventListener("click", () => downloadTextFile("uniscrape_extraction_preview.txt", debugState.extractionPreview));
-if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () => downloadTextFile("uniscrape_api_response.txt", debugState.apiDiscovery.selectedResponse || debugState.renderApi.responseHtml || debugState.renderApi.responseText));
+if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () => downloadTextFile("uniscrape_api_response.txt", debugState.apiDiscovery.selectedResponse || (debugState.renderApi.capturedApis?.length ? JSON.stringify(debugState.renderApi.capturedApis, null, 2) : "") || debugState.renderApi.responseHtml || debugState.renderApi.responseText));
 if (downloadFinalMdBtn) downloadFinalMdBtn.addEventListener("click", () => downloadTextFile("uniscrape_final_extraction_markdown.txt", debugState.finalExtractionMarkdown || debugState.markdown));
 if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
@@ -471,13 +471,12 @@ function normaliseCapturedApiBody(api) {
 
 function scoreCapturedApi(api) {
   const body = normaliseCapturedApiBody(api);
-  const url = String(api?.url || api?.endpoint || api?.requestUrl || "");
-  const blob = `${url}
-${body}`;
-  let score = 0;
+  const url = String(api?.endpointUrl || api?.url || api?.endpoint || api?.requestUrl || "");
+  const blob = `${url}\n${body}`;
+  let score = Number(api?.score || 0);
   score += countKeywords(blob, POSITIVE_KEYWORDS) * 10;
   score += countLikelyProgramMarkdownLinks(body) * 8;
-  score += ((blob.toLowerCase().match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|undergraduate|postgraduate)/g) || []).length * 8);
+  score += ((blob.toLowerCase().match(/\b(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|undergraduate|postgraduate)\b/g) || []).length * 8);
   if (/course|programme|program|study|search|api|json/i.test(url)) score += 25;
   if (/cookie|analytics|tracking|tagmanager|facebook|hotjar/i.test(url)) score -= 50;
   return score;
@@ -488,7 +487,7 @@ function capturedApisToMarkdown(capturedApis, sourceUrl) {
 
   const useful = capturedApis
     .map((api, index) => ({ api, index, score: scoreCapturedApi(api) }))
-    .filter(item => item.score > 0)
+    .filter(item => item.score > 0 || item.api?.hasStrongSignal || item.api?.programCount > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 8);
 
@@ -504,35 +503,57 @@ function capturedApisToMarkdown(capturedApis, sourceUrl) {
   ];
 
   useful.forEach(({ api, score }, i) => {
-    const url = api?.url || api?.endpoint || api?.requestUrl || "";
+    const url = api?.endpointUrl || api?.url || api?.endpoint || api?.requestUrl || "";
     const method = api?.method ? ` ${api.method}` : "";
     const status = api?.status ? ` status=${api.status}` : "";
     const contentType = api?.contentType || api?.type || "";
-    let body = normaliseCapturedApiBody(api);
-
-    if (body.length > 18000) body = body.slice(0, 18000) + "
-[...captured API truncated...]";
+    const programCount = Number(api?.programCount || 0);
 
     lines.push(`## Captured API ${i + 1}`);
     lines.push(`Score: ${score}`);
     if (url) lines.push(`URL: ${url}`);
     if (method || status || contentType) lines.push(`Meta:${method}${status}${contentType ? ` contentType=${contentType}` : ""}`);
-    lines.push("```json");
-    lines.push(body);
-    lines.push("```");
-    lines.push("");
+    if (api?.hasStrongSignal !== undefined) lines.push(`Strong signal: ${api.hasStrongSignal ? "yes" : "no"}`);
+    if (programCount) lines.push(`Extracted program records: ${programCount}`);
+
+    if (Array.isArray(api?.programs) && api.programs.length) {
+      lines.push("");
+      lines.push("### Extracted Programs");
+      api.programs.slice(0, 250).forEach((program, idx) => {
+        const name = program?.name || program?.title || "";
+        const programUrl = program?.url || "";
+        const level = program?.level || "";
+        lines.push(`#### Program ${idx + 1}`);
+        if (name) lines.push(`Name: ${name}`);
+        if (level) lines.push(`Level: ${level}`);
+        if (programUrl) lines.push(`URL: ${programUrl}`);
+        if (program?.extra && typeof program.extra === "object" && Object.keys(program.extra).length) {
+          lines.push("Extra:");
+          lines.push("```json");
+          lines.push(JSON.stringify(program.extra, null, 2));
+          lines.push("```");
+        }
+        lines.push("");
+      });
+    }
+
+    let body = normaliseCapturedApiBody(api);
+    if (body) {
+      if (body.length > 18000) body = body.slice(0, 18000) + "\n[...captured API truncated...]";
+      lines.push("### Raw / Preview Body");
+      lines.push("```json");
+      lines.push(body);
+      lines.push("```");
+      lines.push("");
+    }
   });
 
-  return lines.join("
-").trim();
+  return lines.join("\n").trim();
 }
 
 function buildMarkdownFromRenderData(data, sourceUrl) {
   const parts = [];
-  parts.push(`# Playwright-rendered page data
-
-Source: ${sourceUrl}
-`);
+  parts.push(`# Playwright-rendered page data\n\nSource: ${sourceUrl}\n`);
 
   const capturedApisMd = capturedApisToMarkdown(data.capturedApis, sourceUrl);
   if (capturedApisMd) parts.push(capturedApisMd);
@@ -620,7 +641,7 @@ function isWeakProgramMarkdown(markdown) {
   const lower = markdown.toLowerCase();
   const weakPhraseHits = WEAK_MARKDOWN_PHRASES.filter(p => lower.includes(p)).length;
   const links = (markdown.match(/\[.*?\]\([^)]+\)/g) || []).length;
-  const degreeHits = (lower.match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)/g) || []).length;
+  const degreeHits = (lower.match(/\b(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)\b/g) || []).length;
 
   if (degreeHits >= 2 && countKeywords(markdown, POSITIVE_KEYWORDS) >= 2) return false;
   if (links >= 5 && countKeywords(markdown, POSITIVE_KEYWORDS) >= 3) return false;
@@ -650,7 +671,7 @@ function hasStrongProgramEvidence(markdown) {
   const lower = markdown.toLowerCase();
 
   const degreeHits = (
-    lower.match(/(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)/g) || []
+    lower.match(/\b(bsc|msc|mba|ba|ma|phd|beng|bachelor|master|doctorate|undergraduate|postgraduate)\b/g) || []
   ).length;
 
   const programRecordHits = (
@@ -1064,7 +1085,7 @@ Do not reject a listing page simply because fees, IELTS, or descriptions are mis
 
 The provided markdown may include API-discovered program data converted into markdown. Treat this as official page data if it came from the same university domain. Extract visible program records even if many details are missing.
 
-The provided markdown may include Playwright-rendered content from the official university page. It may include sections titled "Likely Program Links", "Rendered Visible Page Text", or "Rendered HTML Converted to Markdown". Treat these as official rendered page content. If likely program links are present, extract each genuine academic program link as a program record even if detailed fees/admissions fields are blank.
+The provided markdown may include Playwright-rendered content from the official university page. It may include sections titled "Likely Program Links", "Rendered Visible Page Text", "Rendered HTML Converted to Markdown", or "Captured Network/API Course Data". Treat these as official rendered/captured page data. If captured API data contains extracted program records, use those first.
 
 Return ONLY a valid JSON array. No markdown fences, no explanation, no preamble - just the raw JSON array starting with [ and ending with ].
 
@@ -1321,6 +1342,7 @@ function resetDebugState() {
     warnings: [],
     programLinks: [],
     links: [],
+    capturedApis: [],
     responseText: "",
     responseHtml: "",
     selectedMarkdown: "",
@@ -1333,7 +1355,10 @@ function isDebugMenuVisible() {
 }
 
 function loadDebugUiVisibility() {
-  debugUiVisible = localStorage.getItem("uniscrape_debug_visible") === "1";
+  const stored = localStorage.getItem("uniscrape_debug_visible");
+  // Default to visible so debugging is never blocked by localStorage/cache state.
+  debugUiVisible = stored === null ? true : stored === "1";
+  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
   applyDebugUiVisibility();
 }
 
@@ -1347,8 +1372,8 @@ function applyDebugUiVisibility() {
   }
 }
 
-function toggleDebugUiVisibility() {
-  debugUiVisible = !debugUiVisible;
+function toggleDebugUiVisibility(forceVisible = null) {
+  debugUiVisible = forceVisible === null ? !debugUiVisible : Boolean(forceVisible);
   localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
   applyDebugUiVisibility();
 
@@ -1367,6 +1392,13 @@ function initDebugKeyboardShortcut() {
   };
 
   document.addEventListener("keydown", e => {
+    // Quick shortcut: Ctrl/Cmd + Shift + D toggles debug even if focus is in an input.
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      toggleDebugUiVisibility();
+      return;
+    }
+
     if (e.target.closest("input, textarea, select")) return;
     if (e.repeat) return;
 
@@ -1391,6 +1423,10 @@ function initDebugKeyboardShortcut() {
     }
   });
 }
+
+window.uniScrapeShowDebug = () => toggleDebugUiVisibility(true);
+window.uniScrapeHideDebug = () => toggleDebugUiVisibility(false);
+window.uniScrapeToggleDebug = () => toggleDebugUiVisibility();
 
 function isDebugMode() {
   return Boolean(debugModeInput?.checked);
@@ -1788,7 +1824,7 @@ function renderDebugPanel() {
     debugWarningsBlock?.classList.add("hidden");
   }
 
-  const hasApi = Boolean(debugState.apiDiscovery.selectedResponse || rd.responseHtml || rd.responseText);
+  const hasApi = Boolean(debugState.apiDiscovery.selectedResponse || rd.responseHtml || rd.responseText || rd.capturedApis?.length);
   downloadApiResponseBtn?.classList.toggle("hidden", !hasApi);
   downloadFinalMdBtn?.classList.toggle("hidden", !(debugState.finalExtractionMarkdown || debugState.markdown));
 
