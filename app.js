@@ -200,6 +200,34 @@ function updateHint() {
   }
 }
 
+function isLikelyValidApiKey(provider, key) {
+  const k = String(key || "").trim();
+  if (!k || k.length < 20 || k.includes(" ") || k.includes("
+") || k.includes("	")) return false;
+
+  if (provider === "anthropic") {
+    return new RegExp("^sk-ant-[A-Za-z0-9_-]{20,}$").test(k);
+  }
+
+  if (provider === "gemini") {
+    return new RegExp("^AIza[A-Za-z0-9_-]{20,}$").test(k);
+  }
+
+  return true;
+}
+
+function getApiKeyFormatWarning(provider) {
+  if (provider === "anthropic") {
+    return "That does not look like a valid Anthropic API key. Anthropic keys usually start with sk-ant-. Please check the key and try again.";
+  }
+
+  if (provider === "gemini") {
+    return "That does not look like a valid Gemini API key. Gemini/Google API keys usually start with AIza. Please check the key and try again.";
+  }
+
+  return "That API key format does not look valid. Please check the key and try again.";
+}
+
 //Main flow
 scrapeBtn.addEventListener("click", runScrape);
 retryBtn.addEventListener("click", () => { clearError(); runScrape(); });
@@ -218,6 +246,9 @@ async function runScrape() {
 
   if (!url)    return showError("Please enter a URL.");
   if (!apiKey && !debugOnly) return showError("Please enter your API key.");
+  if (apiKey && !debugOnly && !isLikelyValidApiKey(provider, apiKey)) {
+    return showError(getApiKeyFormatWarning(provider));
+  }
   try { new URL(url); } catch { return showError("That does not look like a valid URL."); }
 
   scrapeBtn.disabled = true;
@@ -1356,8 +1387,12 @@ function isDebugMenuVisible() {
 
 function loadDebugUiVisibility() {
   const stored = localStorage.getItem("uniscrape_debug_visible");
-  // Default to visible so debugging is never blocked by localStorage/cache state.
-  debugUiVisible = stored === null ? true : stored === "1";
+  const isDevHost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+
+  // Live site defaults to hidden so normal users never see debug tools by accident.
+  // Local development can remember the previous visible/hidden state.
+  debugUiVisible = isDevHost && stored === "1";
+
   localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
   applyDebugUiVisibility();
 }
@@ -1369,6 +1404,10 @@ function applyDebugUiVisibility() {
 
   if (!debugUiVisible) {
     hideDebugPanel();
+    if (debugModeInput) {
+      debugModeInput.checked = false;
+      localStorage.setItem("uniscrape_debug", "0");
+    }
   }
 }
 
@@ -1429,7 +1468,7 @@ window.uniScrapeHideDebug = () => toggleDebugUiVisibility(false);
 window.uniScrapeToggleDebug = () => toggleDebugUiVisibility();
 
 function isDebugMode() {
-  return Boolean(debugModeInput?.checked);
+  return debugUiVisible && Boolean(debugModeInput?.checked);
 }
 
 function shouldUseRenderFallback(markdown) {
