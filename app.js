@@ -202,15 +202,14 @@ function updateHint() {
 
 function isLikelyValidApiKey(provider, key) {
   const k = String(key || "").trim();
-  if (!k || k.length < 20 || k.includes(" ") || k.includes("
-") || k.includes("	")) return false;
+  if (!k || k.length < 20 || /\s/.test(k)) return false;
 
   if (provider === "anthropic") {
-    return new RegExp("^sk-ant-[A-Za-z0-9_-]{20,}$").test(k);
+    return /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(k);
   }
 
   if (provider === "gemini") {
-    return new RegExp("^AIza[A-Za-z0-9_-]{20,}$").test(k);
+    return /^AIza[A-Za-z0-9_-]{20,}$/.test(k);
   }
 
   return true;
