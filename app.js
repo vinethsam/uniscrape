@@ -253,75 +253,103 @@ async function runScrape() {
   scrapeBtn.disabled = true;
   showStatus("Fetching page content...", 10);
 
-  let html;
+    let html = "";
+  let staticMarkdown = "";
+  let extractionMarkdown = "";
+  let finalSource = "static markdown";
+  let usedInitialRenderFallback = false;
+
   try {
     html = await fetchWithWorker(url);
   } catch (e) {
-    scrapeBtn.disabled = false;
-    return showError("Could not fetch the page: " + e.message + ". Make sure your Cloudflare Worker is deployed and the URL is correct.");
+    if (!isWorkerBlockedFetchError(e)) {
+      scrapeBtn.disabled = false;
+      return showError("Could not fetch the page: " + e.message + ". Make sure your Cloudflare Worker is deployed and the URL is correct.");
+    }
+
+    showStatus("Static fetch was blocked. Falling back to Playwright backend...", 20);
+
+    const renderResult = await tryRenderBackendFallback(url, "");
+
+    if (!renderResult?.markdown) {
+      scrapeBtn.disabled = false;
+      if (isDebugMode()) renderDebugPanel();
+
+      return showError(
+        "The target site blocked the static fetch, and the Playwright backend did not return usable content. Debug note: Worker error was: " + e.message
+      );
+    }
+
+    usedInitialRenderFallback = true;
+    extractionMarkdown = renderResult.markdown;
+    finalSource = renderResult.finalSource + " (worker blocked fallback)";
+    debugState.apiDiscovery.finalSource = finalSource;
+    debugState.finalExtractionMarkdown = extractionMarkdown;
+    debugState.markdown = extractionMarkdown;
   }
 
-  debugState.rawHtml = html;
-  if (isDebugMode()) debugLog("Raw HTML length:", html.length);
+  if (!usedInitialRenderFallback) {
+    debugState.rawHtml = html;
+    if (isDebugMode()) debugLog("Raw HTML length:", html.length);
 
-  showStatus("Cleaning page content and converting to markdown...", 35);
+    showStatus("Cleaning page content and converting to markdown...", 35);
 
-  let staticMarkdown;
-  try {
-    staticMarkdown = prepareMarkdown(html);
-  } catch (e) {
-    scrapeBtn.disabled = false;
-    return showError("Could not process page content: " + e.message);
-  }
+    try {
+      staticMarkdown = prepareMarkdown(html);
+    } catch (e) {
+      scrapeBtn.disabled = false;
+      return showError("Could not process page content: " + e.message);
+    }
 
-  debugState.staticMarkdown = staticMarkdown;
-  debugState.markdown = staticMarkdown;
+    debugState.staticMarkdown = staticMarkdown;
+    debugState.markdown = staticMarkdown;
 
-  showStatus("Checking cleaned content...", 42);
+    showStatus("Checking cleaned content...", 42);
 
-  let extractionMarkdown = staticMarkdown;
-  let finalSource = "static markdown";
+    extractionMarkdown = staticMarkdown;
+    finalSource = "static markdown";
 
-  if (shouldUseRenderFallback(staticMarkdown)) {
-    showStatus("No visible program list found. Searching for hidden course data...", 45);
-    const apiResult = await tryApiDiscoveryFallback(html, url);
-    if (apiResult?.markdown) {
-      showStatus("Possible course data found. Checking quality...", 50);
+    if (shouldUseRenderFallback(staticMarkdown)) {
+      showStatus("No visible program list found. Searching for hidden course data...", 45);
+      const apiResult = await tryApiDiscoveryFallback(html, url);
+      if (apiResult?.markdown) {
+        showStatus("Possible course data found. Checking quality...", 50);
 
-      extractionMarkdown = apiResult.markdown;
-      finalSource = apiResult.finalSource;
-      debugState.apiDiscovery.finalSource = finalSource;
+        extractionMarkdown = apiResult.markdown;
+        finalSource = apiResult.finalSource;
+        debugState.apiDiscovery.finalSource = finalSource;
 
-      const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
-      debugState.apiDiscovery.apiIsStrong = apiIsStrong;
+        const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
+        debugState.apiDiscovery.apiIsStrong = apiIsStrong;
 
-      // Only spend time/money on Playwright if the API discovery result is weak.
-      // Strong API data is usually cheaper and cleaner than rendered HTML.
-      if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
-        showStatus("API result looks weak. Rendering page with backend...", 52);
+        // Only spend time/money on Playwright if the API discovery result is weak.
+        // Strong API data is usually cheaper and cleaner than rendered HTML.
+        if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
+          showStatus("API result looks weak. Rendering page with backend...", 52);
+
+          const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
+
+          if (renderResult?.markdown) {
+            extractionMarkdown = renderResult.markdown;
+            finalSource = renderResult.finalSource;
+            debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
+          } else {
+            debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
+          }
+        }
+      } else {
+        showStatus("No hidden course data found. Rendering page with backend...", 52);
+        debugState.apiDiscovery.finalSource = "failed - trying rendered backend";
 
         const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
 
         if (renderResult?.markdown) {
           extractionMarkdown = renderResult.markdown;
           finalSource = renderResult.finalSource;
-          debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
         } else {
-          debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
+          showStatus("Rendered backend did not return usable program content.", 54);
+          debugState.apiDiscovery.finalSource = "failed - likely deeper rendering/pagination needed";
         }
-      }
-    } else {
-      showStatus("No hidden course data found. Rendering page with backend...", 52);
-      debugState.apiDiscovery.finalSource = "failed - trying rendered backend";
-
-      const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
-
-      if (renderResult?.markdown) {
-        extractionMarkdown = renderResult.markdown;
-        finalSource = renderResult.finalSource;
-      } else {
-        showStatus("Rendered backend did not return usable program content.", 54);
-        debugState.apiDiscovery.finalSource = "failed - likely deeper rendering/pagination needed";
       }
     }
   }
@@ -411,12 +439,32 @@ async function fetchWithWorker(url, timeoutMs = 25000) {
   try {
     res = await fetch(proxyUrl, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-    throw new Error("Could not reach the proxy worker: " + e.message);
+      if (!res.ok) {
+    const err = new Error(data?.error ?? "Worker returned HTTP " + res.status);
+    err.status = res.status;
+    err.workerError = true;
+    err.responseData = data;
+    throw err;
+  }
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error ?? "Worker returned HTTP " + res.status);
   if (!data?.contents || typeof data.contents !== "string") throw new Error("Unexpected response from worker.");
   return data.contents;
+}
+function isWorkerBlockedFetchError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const status = Number(error?.status || 0);
+
+  return (
+    status === 403 ||
+    message.includes("http 403") ||
+    message.includes("returned 403") ||
+    message.includes("target site returned http 403") ||
+    message.includes("forbidden") ||
+    message.includes("access denied") ||
+    message.includes("blocked")
+  );
 }
 
 async function fetchWithRenderApi(url) {
