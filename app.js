@@ -253,7 +253,7 @@ async function runScrape() {
   scrapeBtn.disabled = true;
   showStatus("Fetching page content...", 10);
 
-    let html = "";
+      let html = "";
   let staticMarkdown = "";
   let extractionMarkdown = "";
   let finalSource = "static markdown";
@@ -275,8 +275,12 @@ async function runScrape() {
       scrapeBtn.disabled = false;
       if (isDebugMode()) renderDebugPanel();
 
+      const renderError = debugState.renderApi.error
+        ? " Render note: " + debugState.renderApi.error
+        : "";
+
       return showError(
-        "The target site blocked the static fetch, and the Playwright backend did not return usable content. Debug note: Worker error was: " + e.message
+        "The target site blocked the static fetch, and the Playwright backend could not reach usable university content." + renderError + " Worker note: " + e.message
       );
     }
 
@@ -433,38 +437,104 @@ async function runScrape() {
 }
 
 //Fetch via Cloudflare Worker
+//Fetch via Cloudflare Worker
 async function fetchWithWorker(url, timeoutMs = 25000) {
   const proxyUrl = WORKER_URL.replace(/\/$/, "") + "?url=" + encodeURIComponent(url);
   let res;
+
   try {
     res = await fetch(proxyUrl, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-      if (!res.ok) {
+    const err = new Error("Could not reach the proxy worker: " + e.message);
+    err.workerError = true;
+    err.networkError = true;
+    throw err;
+  }
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
     const err = new Error(data?.error ?? "Worker returned HTTP " + res.status);
     err.status = res.status;
     err.workerError = true;
     err.responseData = data;
     throw err;
   }
+
+  if (!data?.contents || typeof data.contents !== "string") {
+    const err = new Error("Unexpected response from worker.");
+    err.workerError = true;
+    err.responseData = data;
+    throw err;
   }
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error ?? "Worker returned HTTP " + res.status);
-  if (!data?.contents || typeof data.contents !== "string") throw new Error("Unexpected response from worker.");
+
   return data.contents;
 }
+
 function isWorkerBlockedFetchError(error) {
   const message = String(error?.message || "").toLowerCase();
   const status = Number(error?.status || 0);
 
   return (
+    status === 401 ||
     status === 403 ||
+    status === 429 ||
+    message.includes("http 401") ||
     message.includes("http 403") ||
+    message.includes("http 429") ||
+    message.includes("returned 401") ||
     message.includes("returned 403") ||
+    message.includes("returned 429") ||
     message.includes("target site returned http 403") ||
     message.includes("forbidden") ||
     message.includes("access denied") ||
-    message.includes("blocked")
+    message.includes("blocked") ||
+    message.includes("bot") ||
+    message.includes("captcha") ||
+    message.includes("cloudflare")
   );
+}
+
+function isSecurityChallengeContent(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return false;
+
+  const strongSignals = [
+    "performing security verification",
+    "verify you are human",
+    "checking if the site connection is secure",
+    "enable javascript and cookies to continue",
+    "this website uses a security service to protect against malicious bots",
+    "challenges.cloudflare.com",
+    "/cdn-cgi/challenge-platform",
+    "cf-chl",
+    "turnstile",
+    "ray id:",
+    "performance and security by cloudflare",
+  ];
+
+  return strongSignals.some(signal => text.includes(signal));
+}
+
+function isRenderSecurityChallenge(data, markdown = "") {
+  if (!data && !markdown) return false;
+
+  const combined = [
+    markdown,
+    data?.text,
+    data?.html,
+    ...(Array.isArray(data?.links) ? data.links.map(l => `${l?.text || ""} ${l?.href || ""}`) : []),
+    ...(Array.isArray(data?.capturedApis) ? data.capturedApis.map(api => {
+      try { return JSON.stringify(api); }
+      catch { return String(api); }
+    }) : []),
+  ].join("\n");
+
+  return isSecurityChallengeContent(combined);
+}
+
+function getRenderSecurityChallengeMessage() {
+  return "Playwright reached a Cloudflare/security verification page instead of the target university content.";
 }
 
 async function fetchWithRenderApi(url) {
@@ -674,8 +744,10 @@ async function tryRenderBackendFallback(pageUrl, staticMarkdown = "") {
   debugState.renderApi.error = "";
 
   showStatus("Rendering JavaScript page with Playwright backend...", 55);
+
   try {
     const data = await fetchWithRenderApi(pageUrl);
+
     debugState.renderApi.success = true;
     debugState.renderApi.stats = data.stats || null;
     debugState.renderApi.warnings = Array.isArray(data.warnings) ? data.warnings : [];
@@ -688,6 +760,15 @@ async function tryRenderBackendFallback(pageUrl, staticMarkdown = "") {
     const renderMarkdown = buildMarkdownFromRenderData(data, pageUrl);
     debugState.renderApi.selectedMarkdown = renderMarkdown;
 
+    if (isRenderSecurityChallenge(data, renderMarkdown)) {
+      debugState.renderApi.error = getRenderSecurityChallengeMessage();
+      debugState.renderApi.warnings = [
+        ...debugState.renderApi.warnings,
+        getRenderSecurityChallengeMessage(),
+      ];
+      return null;
+    }
+
     if (!renderMarkdown || isWeakProgramMarkdown(renderMarkdown)) {
       debugState.renderApi.error = "Render backend returned weak markdown.";
       return null;
@@ -696,7 +777,11 @@ async function tryRenderBackendFallback(pageUrl, staticMarkdown = "") {
     const finalMarkdown = mergeRenderedMarkdown(staticMarkdown, renderMarkdown);
     debugState.finalExtractionMarkdown = finalMarkdown;
     debugState.markdown = finalMarkdown;
-    return { markdown: finalMarkdown, finalSource: "playwright-rendered backend" };
+
+    return {
+      markdown: finalMarkdown,
+      finalSource: "playwright-rendered backend",
+    };
   } catch (e) {
     debugState.renderApi.error = e.message;
     if (isDebugMode()) debugLog("Render backend failed:", e.message);
