@@ -172,7 +172,36 @@ main {
 }
 .text-input:focus { border-color: var(--border-focus); }
 .text-input::placeholder { color: var(--text-dim); }
-.text-input option { background: var(--surface); }
+.text-input option { background: var(--surface); 
+}
+
+/* ---- Custom checkbox --------------------------------------------- */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border-focus);
+  border-radius: 2px;
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  background: #0f0f0f;
+  border-radius: 1px;
+}
 
 /* ---- Buttons ------------------------------------------------------ */
 .primary-btn {
@@ -482,6 +511,30 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   flex-direction: column;
   gap: .6rem;
 }
+
+.modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-focus) var(--surface);
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-focus);
+  border-radius: 99px;
+  border: 2px solid var(--surface);
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
+
 .modal-description {
   font-size: .8rem;
   color: var(--text);
@@ -541,6 +594,54 @@ footer {
   text-align: center;
   font-size: .68rem;
   color: var(--text-dim);
+}
+
+/* ---- Debug controls ----------------------------------------------- */
+.debug-options-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 0;
+}
+
+.debug-content-mode {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.debug-content-mode .field-label {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.debug-content-mode select {
+  min-width: 150px;
+}
+
+@media (max-width: 700px) {
+  .debug-options-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .debug-toggle {
+    align-items: flex-start;
+  }
+
+  .debug-content-mode {
+    margin-left: 0;
+    justify-content: space-between;
+  }
 }
 
 /* ---- Utility ------------------------------------------------------ */

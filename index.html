@@ -85,19 +85,22 @@
       </div>
 
       <div id="debugOptions" class="debug-options">
-        <label class="debug-check">
-          <input type="checkbox" id="debugMode" />
-          Debug mode — save raw and cleaned content
-        </label>
-        <div class="field-group content-mode-group">
-          <label class="field-label" for="contentMode">Content mode</label>
-          <select id="contentMode" class="text-input">
-            <option value="auto">Auto</option>
-            <option value="best">Best content</option>
-            <option value="body">Full body</option>
-          </select>
-        </div>
-      </div>
+  <div class="debug-options-row">
+    <label class="debug-toggle">
+      <input type="checkbox" id="debugMode" />
+      <span>Debug mode — save raw and cleaned content</span>
+    </label>
+
+    <div class="debug-content-mode">
+      <label for="contentMode" class="field-label">Content mode</label>
+      <select id="contentMode" class="text-input">
+        <option value="auto">Auto</option>
+        <option value="best">Best content</option>
+        <option value="body">Full body</option>
+      </select>
+    </div>
+  </div>
+</div>
     </section>
 
     <!-- Debug (visible only when debug mode is on and after cleaning) -->
