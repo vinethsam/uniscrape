@@ -57,6 +57,14 @@ let debugState = {
     selectedMarkdown: "",
     error: "",
   },
+  backend: {
+    pageType: "unknown",
+    preparserRan: false,
+    markdownCharsBeforePreparser: 0,
+    markdownCharsAfterPreparser: 0,
+    modelUsed: "",
+    source: "",
+  },
 };
 
 const POSITIVE_KEYWORDS = [
@@ -216,6 +224,14 @@ async function useBackendExtract(url, debugOnly) {
       debugState.finalExtractionMarkdown = data.markdown;
       debugState.markdown = data.markdown;
     }
+    if (data) {
+      debugState.backend.pageType = data.pageType || debugState.backend.pageType || "unknown";
+      debugState.backend.preparserRan = Boolean(data.preparserRan);
+      debugState.backend.markdownCharsBeforePreparser = Number(data.markdownCharsBeforePreparser || 0);
+      debugState.backend.markdownCharsAfterPreparser = Number(data.markdownCharsAfterPreparser || 0);
+      debugState.backend.modelUsed = data.modelUsed || "";
+      debugState.backend.source = data.source || "backend";
+    }
     throw new Error(detail);
   }
 
@@ -239,6 +255,13 @@ async function useBackendExtract(url, debugOnly) {
   if (Array.isArray(data.warnings)) {
     debugState.renderApi.warnings = data.warnings;
   }
+
+  debugState.backend.pageType = data.pageType || "unknown";
+  debugState.backend.preparserRan = Boolean(data.preparserRan);
+  debugState.backend.markdownCharsBeforePreparser = Number(data.markdownCharsBeforePreparser || 0);
+  debugState.backend.markdownCharsAfterPreparser = Number(data.markdownCharsAfterPreparser || 0);
+  debugState.backend.modelUsed = data.modelUsed || "";
+  debugState.backend.source = data.source || "backend";
 
   debugState.apiDiscovery.finalSource = data.source || "backend";
   debugState.renderApi.attempted = true;
@@ -1397,6 +1420,14 @@ function resetDebugState() {
     selectedMarkdown: "",
     error: "",
   };
+  debugState.backend = {
+    pageType: "unknown",
+    preparserRan: false,
+    markdownCharsBeforePreparser: 0,
+    markdownCharsAfterPreparser: 0,
+    modelUsed: "",
+    source: "",
+  };
 }
 
 function isDebugMenuVisible() {
@@ -1812,11 +1843,17 @@ function buildExtractionPreview(markdown, sourceUrl, provider) {
 
 function downloadTextFile(filename, content) {
   const blob = new Blob([content || ""], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
 }
 
 async function copyMarkdownPreview() {
@@ -1837,13 +1874,19 @@ function renderDebugPanel() {
   const s = debugState.stats;
   const ad = debugState.apiDiscovery;
   const rd = debugState.renderApi;
+  const be = debugState.backend || {};
   debugStatsEl.innerHTML = [
     `<div><span class="debug-k">Raw HTML</span> ${s.rawHtmlLength?.toLocaleString() ?? 0} chars</div>`,
     `<div><span class="debug-k">Selected HTML</span> ${s.selectedHtmlLength?.toLocaleString() ?? 0} chars</div>`,
     `<div><span class="debug-k">Static markdown</span> ${(debugState.staticMarkdown || "").length.toLocaleString()} chars</div>`,
     `<div><span class="debug-k">Final extraction markdown</span> ${(debugState.finalExtractionMarkdown || debugState.markdown || "").length.toLocaleString()} chars</div>`,
+    `<div><span class="debug-k">Backend page type</span> ${esc(be.pageType || "unknown")}</div>`,
+    `<div><span class="debug-k">Backend preparser ran</span> ${be.preparserRan ? "yes" : "no"}</div>`,
+    be.markdownCharsBeforePreparser ? `<div><span class="debug-k">Markdown before preparser</span> ${Number(be.markdownCharsBeforePreparser).toLocaleString()} chars</div>` : "",
+    be.markdownCharsAfterPreparser ? `<div><span class="debug-k">Markdown after preparser</span> ${Number(be.markdownCharsAfterPreparser).toLocaleString()} chars</div>` : "",
+    be.modelUsed ? `<div><span class="debug-k">Model used</span> ${esc(be.modelUsed)}</div>` : "",
     `<div><span class="debug-k">Root strategy</span> ${esc(debugState.rootStrategy || "—")}</div>`,
-    `<div><span class="debug-k">Final content source</span> ${esc(ad.finalSource || rd.finalSource || (ad.attempted ? "static markdown" : "—"))}</div>`,
+    `<div><span class="debug-k">Final content source</span> ${esc(be.source || ad.finalSource || rd.finalSource || (ad.attempted ? "static markdown" : "—"))}</div>`,
     `<div><span class="debug-k">Program keywords</span> ${s.positiveKeywordHits ?? 0} hits ${s.hasProgramKeywords ? "(detected)" : "(weak)"}</div>`,
     `<div><span class="debug-k">Markdown links</span> ${s.linkCount ?? 0}</div>`,
     `<div><span class="debug-k">JS shell suspected</span> ${s.suspectedJsShell ? "yes" : "no"}</div>`,
