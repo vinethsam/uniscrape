@@ -687,3 +687,67 @@ footer {
 
 /* ---- Utility ------------------------------------------------------ */
 .hidden { display: none !important; }
+/* --------------------------------------------------------------------------
+   Global scrollbar styling
+-------------------------------------------------------------------------- */
+
+:root {
+  --scrollbar-track: #111111;
+  --scrollbar-thumb: #2a2a2a;
+  --scrollbar-thumb-hover: #3a3a3a;
+  --scrollbar-thumb-active: #4a4a4a;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Chrome, Edge, Safari */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+/* Make common scrollable UI areas inherit the same scrollbar look */
+html,
+body,
+.table-wrap,
+.table-container,
+.results-wrap,
+.modal,
+.modal-content,
+.debug-panel,
+.debug-content,
+.markdown-preview,
+pre,
+textarea,
+select,
+.dropdown,
+.dropdown-menu {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
