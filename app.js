@@ -4,6 +4,7 @@
 
 //Config — limit applies to cleaned markdown, not raw HTML
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
+const EXTRACT_TIMEOUT_MS = 300000;
 const MAX_HTML_CHARS          = 80000;
 const MIN_MARKDOWN_CHARS      = 500;
 const MAX_API_CANDIDATES      = 12;
@@ -209,7 +210,7 @@ async function useBackendExtract(url, debugOnly) {
       password,
       debug: debugOnly,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
 
   const data = await res.json().catch(() => null);
