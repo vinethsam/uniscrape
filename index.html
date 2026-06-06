@@ -58,31 +58,22 @@
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
 
-      <div class="two-col">
-        <div class="field-group">
-          <label class="field-label">API Provider</label>
-          <select id="apiProvider" class="text-input">
-            <option value="anthropic">Anthropic</option>
-            <option value="gemini">Google Gemini</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">
-            API Key
-            <span class="field-note">- saved in your browser only</span>
-          </label>
-          <input
-            type="password"
-            id="apiKeyInput"
-            class="text-input"
-            placeholder="Paste your API key here..."
-            autocomplete="off"
-          />
-          <p class="field-hint" id="apiHint">
-            Get a key at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>
-          </p>
-        </div>
-      </div>
+      <div class="field-group">
+  <label class="field-label">
+    Access Password
+    <span class="field-note">- required to use the extraction service</span>
+  </label>
+  <input
+    type="password"
+    id="accessPassword"
+    class="text-input"
+    placeholder="Enter access password"
+    autocomplete="off"
+  />
+  <p class="field-hint">
+    This password gives access to the UniScrape backend extraction API.
+  </p>
+</div>
 
       <div id="debugOptions" class="debug-options">
   <div class="debug-options-row">
@@ -235,10 +226,9 @@
   </main>
 
   <footer>
-    <p>Data sourced exclusively from official university websites. <span class="version-mark">v3.1</span></p>
+    <p>Data sourced exclusively from official university websites. <span class="version-mark">v3.2</span></p>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js"></script>
   <script src="subject_mapping.js"></script>
   <script src="app.js"></script>
 </body>

@@ -3,6 +3,7 @@
 */
 
 //Config — limit applies to cleaned markdown, not raw HTML
+const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
 const MAX_HTML_CHARS          = 80000;
 const MIN_MARKDOWN_CHARS      = 500;
 const MAX_API_CANDIDATES      = 12;
@@ -107,9 +108,7 @@ const CANDIDATE_SELECTORS = [
 ];
 
 //DOM refs
-const urlInput         = document.getElementById("urlInput");
-const apiProvider      = document.getElementById("apiProvider");
-const apiKeyInput      = document.getElementById("apiKeyInput");
+const accessPasswordInput = document.getElementById("accessPassword");
 const apiHint          = document.getElementById("apiHint");
 const scrapeBtn        = document.getElementById("scrapeBtn");
 const statusSection    = document.getElementById("statusSection");
@@ -151,8 +150,13 @@ const downloadApiResponseBtn = document.getElementById("downloadApiResponseBtn")
 const downloadFinalMdBtn = document.getElementById("downloadFinalMdBtn");
 
 //Persist settings
-apiProvider.value = localStorage.getItem("uniscrape_provider") || "anthropic";
-apiKeyInput.value = localStorage.getItem("uniscrape_key_" + apiProvider.value) || "";
+if (accessPasswordInput) {
+  accessPasswordInput.value = localStorage.getItem("uniscrape_access_password") || "";
+  accessPasswordInput.addEventListener("change", () => {
+    localStorage.setItem("uniscrape_access_password", accessPasswordInput.value.trim());
+  });
+}
+
 let debugUiVisible = false;
 let debugKeySeqIndex = 0;
 let debugKeySeqAt = 0;
@@ -173,7 +177,6 @@ if (contentModeSelect) {
 
 loadDebugUiVisibility();
 initDebugKeyboardShortcut();
-updateHint();
 
 if (downloadRawBtn) downloadRawBtn.addEventListener("click", () => downloadTextFile("uniscrape_raw_html.txt", debugState.rawHtml));
 if (downloadSelectedBtn) downloadSelectedBtn.addEventListener("click", () => downloadTextFile("uniscrape_selected_html.txt", debugState.selectedHtml));
@@ -183,48 +186,66 @@ if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () 
 if (downloadFinalMdBtn) downloadFinalMdBtn.addEventListener("click", () => downloadTextFile("uniscrape_final_extraction_markdown.txt", debugState.finalExtractionMarkdown || debugState.markdown));
 if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
-apiProvider.addEventListener("change", () => {
-  localStorage.setItem("uniscrape_provider", apiProvider.value);
-  apiKeyInput.value = localStorage.getItem("uniscrape_key_" + apiProvider.value) || "";
-  updateHint();
-});
-apiKeyInput.addEventListener("change", () => {
-  localStorage.setItem("uniscrape_key_" + apiProvider.value, apiKeyInput.value.trim());
-});
+async function useBackendExtract(url, debugOnly) {
+  const password = accessPasswordInput?.value?.trim() || "";
 
-function updateHint() {
-  if (apiProvider.value === "anthropic") {
-    apiHint.innerHTML = 'Get a key at - <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>';
-  } else {
-    apiHint.innerHTML = 'Get a key at - <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com</a>';
-  }
-}
-
-function isLikelyValidApiKey(provider, key) {
-  const k = String(key || "").trim();
-  if (!k || k.length < 20 || /\s/.test(k)) return false;
-
-  if (provider === "anthropic") {
-    return /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(k);
+  if (!password) {
+    throw new Error("Please enter the access password.");
   }
 
-  if (provider === "gemini") {
-    return /^AIza[A-Za-z0-9_-]{20,}$/.test(k);
+  const res = await fetch(EXTRACT_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url,
+      password,
+      debug: debugOnly,
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (res.status === 401) {
+    throw new Error("Incorrect password. Please check and try again.");
   }
 
-  return true;
-}
-
-function getApiKeyFormatWarning(provider) {
-  if (provider === "anthropic") {
-    return "That does not look like a valid Anthropic API key. Anthropic keys usually start with sk-ant-. Please check the key and try again.";
+  if (res.status === 422) {
+    const detail = data?.detail || "Model returned no valid programs.";
+    if (data?.markdown) {
+      debugState.finalExtractionMarkdown = data.markdown;
+      debugState.markdown = data.markdown;
+    }
+    throw new Error(detail);
   }
 
-  if (provider === "gemini") {
-    return "That does not look like a valid Gemini API key. Gemini/Google API keys usually start with AIza. Please check the key and try again.";
+  if (!res.ok) {
+    throw new Error(data?.detail || "Backend extraction failed with HTTP " + res.status);
   }
 
-  return "That API key format does not look valid. Please check the key and try again.";
+  if (!data) {
+    throw new Error("Backend returned an empty response.");
+  }
+
+  if (data.markdown) {
+    debugState.finalExtractionMarkdown = data.markdown;
+    debugState.markdown = data.markdown;
+  }
+
+  if (data.renderStats) {
+    debugState.renderApi.stats = data.renderStats;
+  }
+
+  if (Array.isArray(data.warnings)) {
+    debugState.renderApi.warnings = data.warnings;
+  }
+
+  debugState.apiDiscovery.finalSource = data.source || "backend";
+  debugState.renderApi.attempted = true;
+  debugState.renderApi.success = true;
+  debugState.renderApi.finalSource = data.source || "backend";
+
+  return data;
 }
 
 //Main flow
@@ -233,9 +254,7 @@ retryBtn.addEventListener("click", () => { clearError(); runScrape(); });
 urlInput.addEventListener("keydown", e => { if (e.key === "Enter") runScrape(); });
 
 async function runScrape() {
-  const url      = urlInput.value.trim();
-  const apiKey   = apiKeyInput.value.trim();
-  const provider = apiProvider.value;
+  const url = urlInput.value.trim();
   const debugOnly = isDebugMode();
 
   resetDebugState();
@@ -243,184 +262,52 @@ async function runScrape() {
   hideResults();
   hideDebugPanel();
 
-  if (!url)    return showError("Please enter a URL.");
-  if (!apiKey && !debugOnly) return showError("Please enter your API key.");
-  if (apiKey && !debugOnly && !isLikelyValidApiKey(provider, apiKey)) {
-    return showError(getApiKeyFormatWarning(provider));
-  }
-  try { new URL(url); } catch { return showError("That does not look like a valid URL."); }
-
-  scrapeBtn.disabled = true;
-  showStatus("Fetching page content...", 10);
-
-      let html = "";
-  let staticMarkdown = "";
-  let extractionMarkdown = "";
-  let finalSource = "static markdown";
-  let usedInitialRenderFallback = false;
+  if (!url) return showError("Please enter a URL.");
 
   try {
-    html = await fetchWithWorker(url);
-  } catch (e) {
-    if (!isWorkerBlockedFetchError(e)) {
+    new URL(url);
+  } catch {
+    return showError("That does not look like a valid URL.");
+  }
+
+  scrapeBtn.disabled = true;
+  showStatus("Extracting programs with UniScrape backend...", 15);
+
+  let programs = [];
+
+  try {
+    const result = await useBackendExtract(url, debugOnly);
+
+    if (debugOnly) {
+      renderDebugPanel();
       scrapeBtn.disabled = false;
-      return showError("Could not fetch the page: " + e.message + ". Make sure your Cloudflare Worker is deployed and the URL is correct.");
+      showStatus("Debug mode — content prepared. Model call skipped.", 100);
+
+      setTimeout(() => {
+        hideStatus();
+      }, 1500);
+
+      return;
     }
 
-    showStatus("Static fetch was blocked. Falling back to Playwright backend...", 20);
+    programs = Array.isArray(result.programs) ? result.programs : [];
 
-    const renderResult = await tryRenderBackendFallback(url, "");
-
-    if (!renderResult?.markdown) {
+    if (!programs.length) {
       scrapeBtn.disabled = false;
       if (isDebugMode()) renderDebugPanel();
 
-      const renderError = debugState.renderApi.error
-        ? " Render note: " + debugState.renderApi.error
-        : "";
-
       return showError(
-        "The target site blocked the static fetch, and the Playwright backend could not reach usable university content." + renderError + " Worker note: " + e.message
+        "No programs were extracted. Enable debug mode and re-run to inspect what the backend received."
       );
     }
-
-    usedInitialRenderFallback = true;
-    extractionMarkdown = renderResult.markdown;
-    finalSource = renderResult.finalSource + " (worker blocked fallback)";
-    debugState.apiDiscovery.finalSource = finalSource;
-    debugState.finalExtractionMarkdown = extractionMarkdown;
-    debugState.markdown = extractionMarkdown;
-  }
-
-  if (!usedInitialRenderFallback) {
-    debugState.rawHtml = html;
-    if (isDebugMode()) debugLog("Raw HTML length:", html.length);
-
-    showStatus("Cleaning page content and converting to markdown...", 35);
-
-    try {
-      staticMarkdown = prepareMarkdown(html);
-    } catch (e) {
-      scrapeBtn.disabled = false;
-      return showError("Could not process page content: " + e.message);
-    }
-
-    debugState.staticMarkdown = staticMarkdown;
-    debugState.markdown = staticMarkdown;
-
-    showStatus("Checking cleaned content...", 42);
-
-    extractionMarkdown = staticMarkdown;
-    finalSource = "static markdown";
-
-    if (shouldUseRenderFallback(staticMarkdown)) {
-      showStatus("No visible program list found. Searching for hidden course data...", 45);
-      const apiResult = await tryApiDiscoveryFallback(html, url);
-      if (apiResult?.markdown) {
-        showStatus("Possible course data found. Checking quality...", 50);
-
-        extractionMarkdown = apiResult.markdown;
-        finalSource = apiResult.finalSource;
-        debugState.apiDiscovery.finalSource = finalSource;
-
-        const apiIsStrong = hasStrongProgramEvidence(extractionMarkdown);
-        debugState.apiDiscovery.apiIsStrong = apiIsStrong;
-
-        // Only spend time/money on Playwright if the API discovery result is weak.
-        // Strong API data is usually cheaper and cleaner than rendered HTML.
-        if (!apiIsStrong && shouldUseRenderFallback(staticMarkdown)) {
-          showStatus("API result looks weak. Rendering page with backend...", 52);
-
-          const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
-
-          if (renderResult?.markdown) {
-            extractionMarkdown = renderResult.markdown;
-            finalSource = renderResult.finalSource;
-            debugState.apiDiscovery.finalSource = "api weak - used rendered backend";
-          } else {
-            debugState.apiDiscovery.finalSource = "api weak - render backend failed or weak";
-          }
-        }
-      } else {
-        showStatus("No hidden course data found. Rendering page with backend...", 52);
-        debugState.apiDiscovery.finalSource = "failed - trying rendered backend";
-
-        const renderResult = await tryRenderBackendFallback(url, staticMarkdown);
-
-        if (renderResult?.markdown) {
-          extractionMarkdown = renderResult.markdown;
-          finalSource = renderResult.finalSource;
-        } else {
-          showStatus("Rendered backend did not return usable program content.", 54);
-          debugState.apiDiscovery.finalSource = "failed - likely deeper rendering/pagination needed";
-        }
-      }
-    }
-  }
-
-  debugState.finalExtractionMarkdown = extractionMarkdown;
-  debugState.markdown = extractionMarkdown;
-  if (!debugState.apiDiscovery.finalSource) {
-    debugState.apiDiscovery.finalSource = finalSource;
-  }
-  if (debugState.renderApi.attempted && debugState.renderApi.success) {
-    debugState.renderApi.finalSource = finalSource;
-  }
-
-  if (isDebugMode()) {
-    renderDebugPanel();
-    debugLog("Selected root strategy:", debugState.rootStrategy);
-    debugLog("Final content source:", finalSource);
-    debugLog("Extraction markdown length:", extractionMarkdown.length);
-    debugLog("Markdown preview (first 5000 chars):\n", extractionMarkdown.slice(0, 5000));
-  }
-
-  if (isWeakProgramMarkdown(extractionMarkdown)) {
-    scrapeBtn.disabled = false;
-    if (isDebugMode()) renderDebugPanel();
-    return showError(
-      "No usable program list was found from static fetch, hidden data endpoints, or rendered backend. This page may require deeper pagination, filters, or load-more handling. Try a direct program page, or inspect Debug downloads."
-    );
-  }
-
-  debugState.extractionPreview = buildExtractionPreview(extractionMarkdown, url, provider);
-
-  if (debugOnly) {
-    renderDebugPanel();
-    scrapeBtn.disabled = false;
-    showStatus("Debug mode active — markdown prepared. API extraction skipped.", 100);
-
-    setTimeout(() => {
-      hideStatus();
-    }, 1200);
-
-    return;
-  }
-
-  const providerLabel = provider === "anthropic" ? "Anthropic" : "Gemini";
-  const sourceNote = finalSource && finalSource !== "static markdown" ? ` from ${finalSource}` : "";
-  showStatus(`Sending ~${extractionMarkdown.length.toLocaleString()} characters to ${providerLabel}${sourceNote}...`, 55);
-
-  let programs;
-  try {
-    programs = provider === "anthropic"
-      ? await extractWithAnthropic(extractionMarkdown, url, apiKey)
-      : await extractWithGemini(extractionMarkdown, url, apiKey);
   } catch (e) {
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
     return showError("Extraction failed: " + e.message);
   }
 
-  if (!programs.length) {
-    scrapeBtn.disabled = false;
-    if (isDebugMode()) renderDebugPanel();
-    return showError(
-      "No programs were extracted. The cleaned markdown may not contain the actual program listing, or the page may load programs dynamically with JavaScript. Enable Debug mode and inspect the Markdown download."
-    );
-  }
-
   showStatus("Mapping subjects...", 82);
+
   programs = programs.map(p => {
     p = mapSubjects(p);
     p = applyFinancialAidStatement(p);
@@ -436,7 +323,6 @@ async function runScrape() {
   scrapeBtn.disabled = false;
 }
 
-//Fetch via Cloudflare Worker
 //Fetch via Cloudflare Worker
 async function fetchWithWorker(url, timeoutMs = 25000) {
   const proxyUrl = WORKER_URL.replace(/\/$/, "") + "?url=" + encodeURIComponent(url);
