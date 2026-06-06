@@ -1,12 +1,10 @@
 /*
    UniScrape v3.2 - app.js
-   Frontend client for the UniScrape backend extraction pipeline.
 */
 
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
-const EXTRACT_TIMEOUT_MS = 300000; // 5 minutes
-
+const EXTRACT_TIMEOUT_MS = 300000;
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 
 // State
@@ -521,19 +519,664 @@ function hideDebugPanel() {
 }
 
 //Subject mapping
+//Subject mapping
+
+const SUBJECT_RULES = [
+
+  // Business and Management Studies
+  {
+    broad: "Business and Management Studies",
+    narrow: "Business and Management Studies",
+    priority: 100,
+    strong: [
+      "business administration", "business management", "business studies", "management studies",
+      "international business", "global business", "business enterprise", "business entrepreneurship",
+      "entrepreneurship", "innovation and entrepreneurship", "enterprise and entrepreneurship",
+      "business leadership", "strategic management", "general management", "management practice",
+      "business strategy", "organisational management", "organizational management", "business operations",
+      "operations management", "project management", "bba", "mba", "dba", "executive mba",
+      "master of business administration", "doctor of business administration"
+    ],
+    medium: [
+      "business", "management", "leadership", "strategy", "operations", "enterprise",
+      "entrepreneurial", "organisational", "organizational", "commercial management",
+      "corporate management", "global management", "innovation management"
+    ]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Accounting and Finance",
+    priority: 115,
+    strong: [
+      "accounting and finance", "finance and accounting", "accountancy", "accounting", "finance",
+      "banking and finance", "international finance", "corporate finance", "financial management",
+      "financial accounting", "management accounting", "forensic accounting", "professional accounting",
+      "investment management", "financial economics", "financial technology", "fintech",
+      "banking", "risk management", "audit", "auditing", "taxation", "tax accounting"
+    ],
+    medium: [
+      "financial", "investment", "investments", "bank", "banks", "capital markets", "portfolio",
+      "wealth management", "insurance", "actuarial finance", "risk", "audit", "tax"
+    ]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Marketing",
+    priority: 112,
+    strong: [
+      "marketing", "digital marketing", "marketing management", "brand management", "branding",
+      "advertising", "public relations", "consumer behaviour", "consumer behavior",
+      "marketing communications", "integrated marketing", "social media marketing", "fashion marketing",
+      "luxury brand management", "retail marketing", "strategic marketing"
+    ],
+    medium: ["brand", "brands", "consumer", "advertising", "promotion", "retail", "market research", "communications"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Business Analytics",
+    priority: 118,
+    strong: [
+      "business analytics", "business data analytics", "management analytics", "analytics for business",
+      "business intelligence", "decision analytics", "marketing analytics", "people analytics",
+      "financial analytics", "digital business analytics"
+    ],
+    medium: ["analytics", "business intelligence", "data-driven management", "decision science"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Human Resource Management",
+    priority: 112,
+    strong: [
+      "human resource management", "human resources", "hrm", "people management", "talent management",
+      "employment relations", "industrial relations", "organisational behaviour", "organizational behavior",
+      "organisational psychology for business", "workplace psychology"
+    ],
+    medium: ["human resource", "hr", "talent", "employee", "workforce", "employment relations"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Supply Chain Management",
+    priority: 113,
+    strong: [
+      "supply chain management", "logistics and supply chain", "logistics management", "procurement",
+      "purchasing and supply", "operations and supply chain", "global supply chain", "shipping and logistics",
+      "transport and logistics", "maritime logistics", "distribution management"
+    ],
+    medium: ["supply chain", "logistics", "procurement", "purchasing", "distribution", "transport management", "shipping"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Hospitality and Leisure Management",
+    priority: 110,
+    strong: [
+      "hospitality management", "hotel management", "tourism management", "travel and tourism",
+      "international tourism", "global tourism", "tourism and hospitality", "events management",
+      "event management", "leisure management", "recreation management", "resort management",
+      "culinary management", "food and beverage management"
+    ],
+    medium: ["hospitality", "tourism", "hotel", "hotels", "events", "event", "leisure", "resort", "culinary", "travel"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Real Estate",
+    priority: 106,
+    strong: ["real estate", "property management", "property development", "real estate investment", "estate management", "built environment management"],
+    medium: ["property", "real estate", "valuation", "surveying practice"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Fashion Management",
+    priority: 118,
+    strong: [
+      "fashion management", "fashion business", "fashion marketing", "fashion merchandising",
+      "luxury fashion management", "fashion buying", "fashion retail", "fashion communication",
+      "luxury brand management", "fashion entrepreneurship"
+    ],
+    medium: ["fashion business", "fashion marketing", "fashion retail", "merchandising", "luxury brand"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Sports Management",
+    priority: 110,
+    strong: ["sports management", "sport management", "sport business", "sports business", "sport marketing", "football business", "sports administration"],
+    medium: ["sports industry", "sport industry", "club management", "sport development"]
+  },
+  {
+    broad: "Business and Management Studies",
+    narrow: "Healthcare Management",
+    priority: 110,
+    strong: ["healthcare management", "health care management", "health administration", "healthcare administration", "hospital management", "health services management"],
+    medium: ["healthcare leadership", "health service", "hospital administration", "clinical leadership"]
+  },
+
+  // Economics, social sciences, law, media, education
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Economics and Econometrics",
+    priority: 108,
+    strong: ["economics", "econometrics", "economic policy", "financial economics", "business economics", "international economics", "development economics", "applied economics", "political economy"],
+    medium: ["economic", "econometric", "macroeconomics", "microeconomics", "labour economics", "labor economics"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Law and Legal Studies",
+    priority: 112,
+    strong: ["law", "legal studies", "llb", "llm", "juris doctor", "commercial law", "international law", "business law", "criminal law", "human rights law", "legal practice", "paralegal", "criminology and law"],
+    medium: ["legal", "justice", "jurisprudence", "regulation", "compliance", "intellectual property"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Communication and Media Studies",
+    priority: 108,
+    strong: ["communication and media", "media studies", "communications", "mass communication", "journalism", "digital media", "media production", "public relations", "broadcast journalism", "film and media", "sports journalism"],
+    medium: ["media", "journalism", "broadcast", "content creation", "digital communication", "communication"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Education and Training",
+    priority: 108,
+    strong: ["education", "teaching", "teacher education", "early childhood education", "primary education", "secondary education", "tesol", "tefl", "special educational needs", "education leadership", "pedagogy"],
+    medium: ["teacher", "teaching", "learning", "curriculum", "pedagogy", "early years", "childhood education"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Politics",
+    priority: 106,
+    strong: ["politics", "political science", "international relations", "public policy", "global affairs", "diplomacy", "governance", "security studies", "war studies", "peace and conflict"],
+    medium: ["political", "policy", "diplomatic", "government", "geopolitics", "international affairs"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Sociology",
+    priority: 105,
+    strong: ["sociology", "social research", "social studies", "social theory", "criminology", "social justice", "gender studies", "youth studies"],
+    medium: ["social", "society", "criminological", "community studies", "inequality"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Social Policy and Administration",
+    priority: 105,
+    strong: ["social policy", "public administration", "public management", "social work", "welfare", "community development", "policy administration"],
+    medium: ["public sector", "administration", "welfare", "social care", "public service"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Anthropology",
+    priority: 102,
+    strong: ["anthropology", "social anthropology", "cultural anthropology", "medical anthropology"],
+    medium: ["anthropological", "ethnography", "ethnographic"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Development Studies",
+    priority: 104,
+    strong: ["development studies", "international development", "global development", "sustainable development", "humanitarian action", "ngo management"],
+    medium: ["development", "humanitarian", "poverty", "sustainability policy"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Library and Information Management",
+    priority: 104,
+    strong: ["library and information", "information management", "library science", "archives", "records management", "information governance"],
+    medium: ["library", "archive", "records", "information services"]
+  },
+  {
+    broad: "Social Sciences and Management",
+    narrow: "Statistics and Operational Research",
+    priority: 113,
+    strong: ["statistics", "statistical science", "operational research", "operations research", "data statistics", "applied statistics", "medical statistics", "statistical modelling"],
+    medium: ["statistical", "stats", "quantitative methods", "operations research", "optimisation", "optimization"]
+  },
+
+  // Computing, data, games, engineering and technology
+  {
+    broad: "Engineering and Technology",
+    narrow: "Computer Science and Information Systems",
+    priority: 115,
+    strong: [
+      "computer science", "computing", "software engineering", "information systems", "information technology",
+      "cyber security", "cybersecurity", "network security", "computer networks", "cloud computing",
+      "web development", "mobile app development", "computer games programming", "games programming",
+      "game development", "game programming", "internet of things", "iot", "human computer interaction",
+      "hci", "digital technology", "software development", "computer applications"
+    ],
+    medium: ["software", "programming", "developer", "coding", "networking", "database", "it", "information system", "computer"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Data Science and Artificial Intelligence",
+    priority: 120,
+    strong: [
+      "data science", "artificial intelligence", "machine learning", "deep learning", "data analytics",
+      "big data", "ai", "data engineering", "applied artificial intelligence", "robotics and ai",
+      "intelligent systems", "computational intelligence", "data mining", "predictive analytics"
+    ],
+    medium: ["analytics", "algorithm", "algorithms", "neural networks", "data", "machine intelligence", "automation"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Mechanical",
+    priority: 110,
+    strong: ["mechanical engineering", "mechatronics", "automotive engineering", "aerospace engineering", "manufacturing engineering", "robotics engineering", "thermal engineering"],
+    medium: ["mechanical", "mechatronic", "automotive", "aerospace", "manufacturing", "robotics", "cad", "cam"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Electrical and Electronic",
+    priority: 110,
+    strong: ["electrical engineering", "electronic engineering", "electrical and electronic", "electronics", "telecommunications engineering", "communications engineering", "power engineering", "embedded systems"],
+    medium: ["electrical", "electronic", "electronics", "telecommunications", "power systems", "embedded", "circuits"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Civil and Structural",
+    priority: 110,
+    strong: ["civil engineering", "structural engineering", "construction engineering", "construction management", "built environment", "quantity surveying", "surveying", "architectural engineering"],
+    medium: ["civil", "structural", "construction", "surveying", "infrastructure", "building services"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Chemical",
+    priority: 110,
+    strong: ["chemical engineering", "process engineering", "biochemical engineering", "petrochemical engineering", "food process engineering"],
+    medium: ["chemical", "process", "biochemical", "petrochemical"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Petroleum",
+    priority: 110,
+    strong: ["petroleum engineering", "oil and gas engineering", "reservoir engineering", "energy engineering", "offshore engineering"],
+    medium: ["petroleum", "oil and gas", "reservoir", "offshore", "energy systems"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Engineering - Mineral and Mining",
+    priority: 110,
+    strong: ["mining engineering", "mineral engineering", "minerals engineering", "metallurgical engineering", "metallurgy", "geotechnical engineering"],
+    medium: ["mining", "mineral", "minerals", "metallurgy", "geotechnical"]
+  },
+  {
+    broad: "Engineering and Technology",
+    narrow: "Materials Sciences",
+    priority: 108,
+    strong: ["materials science", "materials engineering", "advanced materials", "polymer science", "nanotechnology", "nanoscience", "textile technology"],
+    medium: ["materials", "polymer", "nanotech", "nanoscience", "textile materials"]
+  },
+
+  // Arts, design, architecture, humanities and creative subjects
+  {
+    broad: "Arts and Humanities",
+    narrow: "Art and Design",
+    priority: 116,
+    strong: [
+      "art and design", "graphic design", "fashion design", "game art", "games art", "game art design",
+      "illustration", "animation", "visual communication", "visual arts", "fine art", "fine arts",
+      "digital art", "digital design", "interior design", "product design", "industrial design",
+      "textile design", "jewellery design", "jewelry design", "photography", "creative practice",
+      "concept art", "motion graphics", "ux design", "user experience design", "ui design",
+      "user interface design", "design communication", "design studies"
+    ],
+    medium: ["design", "art", "creative", "visual", "illustration", "animation", "fashion", "textile", "photography", "graphics", "ux", "ui"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Architecture and Built Environment",
+    priority: 110,
+    strong: ["architecture", "architectural design", "landscape architecture", "urban design", "urban planning", "town planning", "spatial planning", "built environment"],
+    medium: ["architectural", "urban", "planning", "landscape", "spatial", "built environment"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Performing Arts",
+    priority: 110,
+    strong: ["performing arts", "drama", "theatre", "theater", "acting", "dance", "musical theatre", "music performance", "screen acting", "performance studies"],
+    medium: ["performance", "drama", "theatre", "theater", "acting", "dance", "stage", "audition"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Music",
+    priority: 108,
+    strong: ["music", "music production", "music technology", "sound design", "audio production", "composition", "music business", "music performance"],
+    medium: ["musical", "audio", "sound", "composition", "songwriting"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "English Language and Literature",
+    priority: 105,
+    strong: ["english literature", "english language", "creative writing", "comparative literature", "literature", "writing", "english studies"],
+    medium: ["literary", "poetry", "novel", "fiction", "writing"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Modern Languages",
+    priority: 105,
+    strong: ["modern languages", "translation", "interpreting", "french", "spanish", "german", "chinese", "japanese", "arabic", "language studies", "linguistics and language"],
+    medium: ["language", "translation", "interpreting", "bilingual", "multilingual"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Linguistics",
+    priority: 106,
+    strong: ["linguistics", "applied linguistics", "language sciences", "phonetics", "sociolinguistics", "discourse analysis"],
+    medium: ["linguistic", "phonology", "syntax", "semantics"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "History",
+    priority: 103,
+    strong: ["history", "modern history", "ancient history", "military history", "public history", "historical studies"],
+    medium: ["historical", "heritage", "medieval", "renaissance"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Philosophy",
+    priority: 103,
+    strong: ["philosophy", "ethics", "logic", "metaphysics", "political philosophy"],
+    medium: ["philosophical", "ethical theory"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Theology, Divinity and Religious Studies",
+    priority: 103,
+    strong: ["theology", "divinity", "religious studies", "religion", "biblical studies", "islamic studies", "christian studies"],
+    medium: ["religious", "faith", "scripture", "ministry"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Archaeology",
+    priority: 103,
+    strong: ["archaeology", "archeology", "archaeological science", "heritage archaeology"],
+    medium: ["archaeological", "archeological", "excavation"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Art History",
+    priority: 103,
+    strong: ["art history", "history of art", "curating", "museum studies", "heritage studies"],
+    medium: ["curatorial", "museum", "gallery", "heritage"]
+  },
+  {
+    broad: "Arts and Humanities",
+    narrow: "Classics and Ancient History",
+    priority: 103,
+    strong: ["classics", "classical studies", "ancient history", "greek and roman", "latin", "ancient civilisation", "ancient civilization"],
+    medium: ["classical", "ancient", "latin"]
+  },
+
+  // Life sciences and medicine
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Psychology",
+    priority: 114,
+    strong: ["psychology", "clinical psychology", "counselling psychology", "counseling psychology", "forensic psychology", "developmental psychology", "educational psychology", "sport psychology", "health psychology", "neuropsychology"],
+    medium: ["psychological", "cognitive", "behavioural", "behavioral", "mental health", "counselling", "counseling"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Medicine",
+    priority: 114,
+    strong: ["medicine", "medical degree", "mbbs", "mbchb", "md", "doctor of medicine", "clinical medicine", "surgery", "physician associate", "public health", "global health"],
+    medium: ["medical", "clinical", "health sciences", "health science", "surgery", "physician"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Nursing",
+    priority: 114,
+    strong: ["nursing", "adult nursing", "mental health nursing", "child nursing", "children's nursing", "midwifery", "registered nurse", "nurse education"],
+    medium: ["nurse", "midwife", "clinical nursing"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Pharmacy and Pharmacology",
+    priority: 112,
+    strong: ["pharmacy", "pharmacology", "pharmaceutical science", "pharmaceutical sciences", "clinical pharmacy", "drug discovery", "medicinal chemistry", "pharmaceutics"],
+    medium: ["pharmaceutical", "pharmacological", "drug", "medicines"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Biological Sciences",
+    priority: 110,
+    strong: ["biological sciences", "biology", "biomedical science", "biochemistry", "molecular biology", "microbiology", "genetics", "cell biology", "biotechnology", "neuroscience", "immunology"],
+    medium: ["biological", "biomedical", "biochemistry", "microbial", "genetic", "molecular", "cellular", "neuroscience", "bioscience"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Dentistry",
+    priority: 112,
+    strong: ["dentistry", "dental surgery", "dental science", "oral health", "orthodontics", "dental hygiene", "dental therapy"],
+    medium: ["dental", "orthodontic", "oral"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Veterinary Science",
+    priority: 112,
+    strong: ["veterinary science", "veterinary medicine", "veterinary nursing", "animal health", "veterinary physiotherapy"],
+    medium: ["veterinary", "vet", "animal health"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Anatomy and Physiology",
+    priority: 108,
+    strong: ["anatomy", "physiology", "human physiology", "sports physiology", "exercise physiology", "pathophysiology"],
+    medium: ["anatomical", "physiological", "human body"]
+  },
+  {
+    broad: "Life Sciences and Medicine",
+    narrow: "Agriculture and Forestry",
+    priority: 108,
+    strong: ["agriculture", "agricultural science", "forestry", "animal science", "plant science", "crop science", "food science", "agribusiness", "horticulture"],
+    medium: ["agricultural", "forest", "forestry", "crop", "plant", "animal production", "horticultural"]
+  },
+
+  // Natural sciences
+  {
+    broad: "Natural Sciences",
+    narrow: "Mathematics",
+    priority: 108,
+    strong: ["mathematics", "applied mathematics", "pure mathematics", "mathematical sciences", "financial mathematics", "computational mathematics"],
+    medium: ["maths", "math", "mathematical", "calculus", "algebra"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Chemistry",
+    priority: 108,
+    strong: ["chemistry", "applied chemistry", "analytical chemistry", "organic chemistry", "inorganic chemistry", "chemical sciences", "forensic chemistry"],
+    medium: ["chemical", "chemist", "molecular chemistry"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Physics and Astronomy",
+    priority: 108,
+    strong: ["physics", "astronomy", "astrophysics", "theoretical physics", "applied physics", "particle physics", "space science"],
+    medium: ["physical science", "astronomical", "quantum", "space"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Environmental Sciences",
+    priority: 108,
+    strong: ["environmental science", "environmental sciences", "environmental management", "climate science", "sustainability", "conservation", "ecology", "environmental studies"],
+    medium: ["environment", "environmental", "climate", "sustainable", "ecological", "conservation"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Geography",
+    priority: 106,
+    strong: ["geography", "human geography", "physical geography", "geographical sciences", "gis", "geographic information systems"],
+    medium: ["geographical", "geospatial", "spatial analysis", "gis"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Earth and Marine Sciences",
+    priority: 106,
+    strong: ["earth sciences", "earth science", "marine science", "marine biology", "oceanography", "earth and marine", "coastal science"],
+    medium: ["marine", "ocean", "coastal", "earth systems"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Geology",
+    priority: 106,
+    strong: ["geology", "geological sciences", "applied geology", "engineering geology"],
+    medium: ["geological", "rocks", "sedimentology"]
+  },
+  {
+    broad: "Natural Sciences",
+    narrow: "Geophysics",
+    priority: 106,
+    strong: ["geophysics", "geophysical sciences", "seismology"],
+    medium: ["geophysical", "seismic", "seismology"]
+  }
+];
+
+const SPECIALIZATION_RULES = [
+  // MBA / business master's / DBA specializations commonly shown by TopMBA and business schools.
+  { value: "Finance", keywords: ["finance", "corporate finance", "investment", "banking", "financial management", "private equity", "risk management"] },
+  { value: "Marketing", keywords: ["marketing", "digital marketing", "brand management", "market analysis", "consumer behaviour", "consumer behavior"] },
+  { value: "Strategy", keywords: ["strategy", "strategic management", "business strategy", "strategic leadership"] },
+  { value: "Operations Management", keywords: ["operations management", "operations", "service management", "product and service management"] },
+  { value: "Supply Chain Management", keywords: ["supply chain", "logistics", "procurement", "purchasing"] },
+  { value: "Human Resource Management", keywords: ["human resource", "human resources", "hrm", "people management", "talent management"] },
+  { value: "International Business", keywords: ["international business", "global business", "global management"] },
+  { value: "Entrepreneurship and Innovation", keywords: ["entrepreneurship", "innovation", "innovation and entrepreneurship", "startup", "start-up"] },
+  { value: "Business Analytics", keywords: ["business analytics", "data analytics", "analytics", "business intelligence"] },
+  { value: "Technology Management", keywords: ["technology management", "it management", "information systems", "technology and analytics", "digital transformation"] },
+  { value: "Healthcare Management", keywords: ["healthcare management", "healthcare administration", "health administration", "hospital management"] },
+  { value: "Project Management", keywords: ["project management", "programme management", "program management"] },
+  { value: "Leadership", keywords: ["leadership", "executive leadership", "strategic leadership"] },
+  { value: "Real Estate", keywords: ["real estate", "property", "real estate investment"] },
+  { value: "Sports Management", keywords: ["sports management", "sport management", "sport business"] },
+
+  // Postgraduate/doctoral/professional academic specializations.
+  { value: "Clinical Psychology", keywords: ["clinical psychology"] },
+  { value: "Counselling Psychology", keywords: ["counselling psychology", "counseling psychology"] },
+  { value: "Forensic Psychology", keywords: ["forensic psychology"] },
+  { value: "Cyber Security", keywords: ["cyber security", "cybersecurity", "information security"] },
+  { value: "Artificial Intelligence", keywords: ["artificial intelligence", "machine learning", "deep learning"] },
+  { value: "Data Science", keywords: ["data science", "big data", "data engineering"] },
+  { value: "Sustainable Development", keywords: ["sustainable development", "sustainability"] },
+  { value: "Public Health", keywords: ["public health", "global health"] }
+];
+
+function normaliseSubjectText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[’']/g, "")
+    .replace(/\b(ba|bsc|ma|msc|mba|bba|beng|meng|llb|llm|phd|dphil|dba|md|hons|honours|honors)\b/g, " ")
+    .replace(/\b(bachelor|bachelors|master|masters|degree|undergraduate|postgraduate|program|programme|course)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function subjectPhraseScore(text, phrase, weight) {
+  const cleanPhrase = normaliseSubjectText(phrase);
+  if (!cleanPhrase) return 0;
+  if (text === cleanPhrase) return weight + 8;
+  if (text.includes(cleanPhrase)) return weight;
+
+  const words = cleanPhrase.split(" ").filter(w => w.length > 2);
+  if (words.length >= 2 && words.every(w => text.includes(w))) {
+    return Math.max(1, Math.floor(weight * 0.6));
+  }
+
+  return 0;
+}
+
+function isPostgraduateOrProfessional(program) {
+  const level = String(program?.level || "").toLowerCase();
+  const name = String(program?.name || "").toLowerCase();
+  return (
+    level.includes("master") ||
+    level.includes("phd") ||
+    level.includes("doctor") ||
+    /\b(mba|dba|msc|ma|llm|mres|mphil|phd|dphil|md|pgdip|pgcert)\b/i.test(name)
+  );
+}
+
+function specializationIsExplicit(program) {
+  const blob = [
+    program?.name,
+    program?.description,
+    program?.department,
+    program?.faculty,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  return /(speciali[sz]ation|concentration|track|pathway|stream|option|major|focus area|career track)/i.test(blob);
+}
+
+function detectSpecialization(program, matchedRule) {
+  const allowSpecialization = isPostgraduateOrProfessional(program) || specializationIsExplicit(program);
+  if (!allowSpecialization) return "";
+
+  const weightedText = normaliseSubjectText([
+    program?.name || "",
+    program?.description || "",
+    program?.department || "",
+    program?.faculty || "",
+  ].join(" "));
+
+  let best = { value: "", score: 0 };
+
+  for (const rule of SPECIALIZATION_RULES) {
+    let score = 0;
+    for (const phrase of rule.keywords || []) score += subjectPhraseScore(weightedText, phrase, 14);
+    if (score > best.score) best = { value: rule.value, score };
+  }
+
+  // Avoid returning a specialization that simply duplicates the chosen narrow subject.
+  if (best.score >= 14 && best.value !== matchedRule?.narrow) return best.value;
+  return "";
+}
+
 function mapSubjects(program) {
-  if (typeof SUBJECT_MAP === "undefined") return { ...program };
-  const key = (program.name ?? "").toLowerCase().trim();
-  if (SUBJECT_MAP[key]) {
-    const s = SUBJECT_MAP[key];
-    return { ...program, narrow_subject: s.narrow || "", broad_subject: s.broad || "" };
+  const titleText = normaliseSubjectText(program?.name || "");
+  const contextText = normaliseSubjectText([
+    program?.department || "",
+    program?.faculty || "",
+    program?.description || "",
+  ].join(" "));
+
+  // Programme title is the strongest evidence. Context helps break ties only.
+  const combinedText = `${titleText} ${titleText} ${titleText} ${contextText}`.trim();
+
+  let best = null;
+
+  for (const rule of SUBJECT_RULES) {
+    let score = Number(rule.priority || 0) * 0.05;
+
+    for (const phrase of rule.strong || []) {
+      score += subjectPhraseScore(titleText, phrase, 22);
+      score += subjectPhraseScore(contextText, phrase, 6);
+    }
+
+    for (const phrase of rule.medium || []) {
+      score += subjectPhraseScore(titleText, phrase, 10);
+      score += subjectPhraseScore(contextText, phrase, 3);
+    }
+
+    if (!best || score > best.score) {
+      best = { rule, score };
+    }
   }
-  const found = Object.entries(SUBJECT_MAP).find(([k]) => k.length > 4 && (key.includes(k) || k.includes(key)));
-  if (found) {
-    const s = found[1];
-    return { ...program, narrow_subject: s.narrow || "", broad_subject: s.broad || "" };
+
+  // Conservative fallback: never force a bad subject if there is no real evidence.
+  if (!best || best.score < 18) {
+    return {
+      ...program,
+      broad_subject: "",
+      narrow_subject: "",
+      specialization: program?.specialization || "",
+    };
   }
-  return { ...program, narrow_subject: program.narrow_subject || "", broad_subject: program.broad_subject || "" };
+
+  const specialization = detectSpecialization(program, best.rule);
+
+  return {
+    ...program,
+    broad_subject: best.rule.broad || "",
+    narrow_subject: best.rule.narrow || "",
+    specialization,
+  };
 }
 
 //Render results
