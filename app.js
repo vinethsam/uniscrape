@@ -195,6 +195,35 @@ if (downloadApiResponseBtn) downloadApiResponseBtn.addEventListener("click", () 
 if (downloadFinalMdBtn) downloadFinalMdBtn.addEventListener("click", () => downloadTextFile("uniscrape_final_extraction_markdown.txt", debugState.finalExtractionMarkdown || debugState.markdown));
 if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
+let statusSequenceTimer = null;
+
+function startStatusSequence(messages, intervalMs = 3500) {
+  stopStatusSequence();
+
+  if (!Array.isArray(messages) || !messages.length) {
+    return;
+  }
+
+  let index = 0;
+  showStatus(messages[index].text, messages[index].progress);
+
+  statusSequenceTimer = setInterval(() => {
+    index = Math.min(index + 1, messages.length - 1);
+    showStatus(messages[index].text, messages[index].progress);
+
+    if (index >= messages.length - 1) {
+      stopStatusSequence();
+    }
+  }, intervalMs);
+}
+
+function stopStatusSequence() {
+  if (statusSequenceTimer) {
+    clearInterval(statusSequenceTimer);
+    statusSequenceTimer = null;
+  }
+}
+
 async function useBackendExtract(url, debugOnly) {
   const password = accessPasswordInput?.value?.trim() || "";
 
@@ -295,18 +324,26 @@ async function runScrape() {
   }
 
   scrapeBtn.disabled = true;
-  showStatus("Extracting programs with UniScrape backend...", 15);
+    startStatusSequence([
+    { text: "Connecting to UniScrape backend...", progress: 12 },
+    { text: "Rendering page with Playwright...", progress: 24 },
+    { text: "Capturing stable page content...", progress: 36 },
+    { text: "Filtering noisy scripts and assets...", progress: 48 },
+    { text: "Building extraction markdown...", progress: 60 },
+    { text: "Sending content to the model...", progress: 72 },
+    { text: "Parsing structured JSON response...", progress: 84 },
+  ]);
 
   let programs = [];
 
   try {
     const result = await useBackendExtract(url, debugOnly);
 
-    if (debugOnly) {
+        if (debugOnly) {
+      stopStatusSequence();
       renderDebugPanel();
       scrapeBtn.disabled = false;
-      showStatus("Debug mode — content prepared. Model call skipped.", 100);
-
+      showStatus("Debug mode - content prepared. Model call skipped.", 100);
       setTimeout(() => {
         hideStatus();
       }, 1500);
@@ -324,13 +361,15 @@ async function runScrape() {
         "No programs were extracted. Enable debug mode and re-run to inspect what the backend received."
       );
     }
-  } catch (e) {
+    } catch (e) {
+    stopStatusSequence();
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
     return showError("Extraction failed: " + e.message);
-  }
+    }
 
-  showStatus("Mapping subjects...", 82);
+    stopStatusSequence();
+    showStatus("Mapping subjects...", 82);
 
   programs = programs.map(p => {
     p = mapSubjects(p);
