@@ -98,7 +98,10 @@ const accessCodeCancel = document.getElementById("accessCodeCancel");
 const accessCodeClose = document.getElementById("accessCodeClose");
 const accessCodeError = document.getElementById("accessCodeError");
 
-let accessCodeContinuation = null;
+const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
+const ACCESS_CODE_CHECKING_LABEL = "Checking...";
+let pendingAccessCodeRequest = null;
+let accessCodeChecking = false;
 
 //Persist settings
 function getStoredAccessCode() {
@@ -181,7 +184,7 @@ function isInvalidAccessCodeError(error) {
   return error?.code === "INVALID_ACCESS_CODE";
 }
 
-async function useBackendExtract(url, debugOnly, accessCode) {
+async function sendBackendExtractRequest(url, debugOnly, accessCode) {
   const trimmedAccessCode = String(accessCode || "").trim();
 
   if (!trimmedAccessCode) {
@@ -199,11 +202,15 @@ async function useBackendExtract(url, debugOnly, accessCode) {
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
 
-  const data = await res.json().catch(() => null);
-
   if (res.status === 401) {
     throw createInvalidAccessCodeError();
   }
+
+  return res;
+}
+
+async function readBackendExtractResponse(res) {
+  const data = await res.json().catch(() => null);
 
   if (res.status === 422) {
     updateDebugStateFromBackend(data);
@@ -220,6 +227,11 @@ async function useBackendExtract(url, debugOnly, accessCode) {
 
   updateDebugStateFromBackend(data);
   return data;
+}
+
+async function useBackendExtract(url, debugOnly, accessCode) {
+  const res = await sendBackendExtractRequest(url, debugOnly, accessCode);
+  return readBackendExtractResponse(res);
 }
 
 function updateDebugStateFromBackend(data) {
@@ -288,14 +300,14 @@ function prepareExtractionRequest() {
 function ensureAccessCodeThenRun(request) {
   const storedAccessCode = getStoredAccessCode();
   if (storedAccessCode) {
-    runScrape(request, storedAccessCode);
+    runExtractionWithAccessCode(request, storedAccessCode);
     return;
   }
 
-  openAccessCodeModal(accessCode => runScrape(request, accessCode));
+  openAccessCodeModal(request);
 }
 
-async function runScrape(request, accessCode) {
+async function runExtractionWithAccessCode(request, accessCode, acceptedResponse = null) {
   const { url, debugOnly } = request;
 
   resetDebugState();
@@ -317,7 +329,9 @@ async function runScrape(request, accessCode) {
   let programs = [];
 
   try {
-    const result = await useBackendExtract(url, debugOnly, accessCode);
+    const result = acceptedResponse
+      ? await readBackendExtractResponse(acceptedResponse)
+      : await useBackendExtract(url, debugOnly, accessCode);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -341,9 +355,7 @@ async function runScrape(request, accessCode) {
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
     if (isInvalidAccessCodeError(e)) {
-      clearStoredAccessCode();
-      showError(INVALID_ACCESS_CODE_MESSAGE);
-      openAccessCodeModal(nextAccessCode => runScrape(request, nextAccessCode));
+      handleInvalidAccessCode(request);
       return;
     }
     return showError("Extraction failed: " + e.message);
@@ -367,59 +379,122 @@ async function runScrape(request, accessCode) {
   scrapeBtn.disabled = false;
 }
 
-function openAccessCodeModal(onUnlock) {
+function openAccessCodeModal(request, options = {}) {
   if (!accessCodeModal || !accessCodeInput) return;
 
-  accessCodeContinuation = onUnlock;
-  accessCodeInput.value = "";
+  const { errorMessage = "", preserveValue = false } = options;
+  pendingAccessCodeRequest = request;
+  if (!preserveValue) accessCodeInput.value = "";
   accessCodeInput.type = "password";
   accessCodeInput.removeAttribute("aria-invalid");
   if (accessCodeToggle) accessCodeToggle.textContent = "Show";
-  clearAccessCodeModalError();
+  setAccessCodeModalLoading(false);
+  setAccessCodeModalError(errorMessage);
   accessCodeModal.classList.remove("hidden");
-  setTimeout(() => accessCodeInput.focus(), 0);
+  setTimeout(() => {
+    accessCodeInput.focus();
+    if (errorMessage || preserveValue) accessCodeInput.select();
+  }, 0);
 }
 
 function closeAccessCodeModal() {
+  if (accessCodeChecking) return;
+
   accessCodeModal?.classList.add("hidden");
-  accessCodeContinuation = null;
+  pendingAccessCodeRequest = null;
   if (accessCodeInput) {
     accessCodeInput.value = "";
     accessCodeInput.type = "password";
     accessCodeInput.removeAttribute("aria-invalid");
   }
   if (accessCodeToggle) accessCodeToggle.textContent = "Show";
-  clearAccessCodeModalError();
+  setAccessCodeModalLoading(false);
+  setAccessCodeModalError("");
+}
+
+function setAccessCodeModalLoading(isLoading) {
+  accessCodeChecking = Boolean(isLoading);
+
+  if (accessCodeInput) accessCodeInput.disabled = accessCodeChecking;
+  if (accessCodeToggle) accessCodeToggle.disabled = accessCodeChecking;
+  if (accessCodeCancel) accessCodeCancel.disabled = accessCodeChecking;
+  if (accessCodeClose) accessCodeClose.disabled = accessCodeChecking;
+  if (accessCodeSubmit) {
+    accessCodeSubmit.disabled = accessCodeChecking;
+    accessCodeSubmit.textContent = accessCodeChecking ? ACCESS_CODE_CHECKING_LABEL : ACCESS_CODE_SUBMIT_LABEL;
+  }
+}
+
+function setAccessCodeModalError(message) {
+  if (!accessCodeError) return;
+  accessCodeError.textContent = message || "";
+  accessCodeError.classList.toggle("hidden", !message);
+  if (message) {
+    accessCodeInput?.setAttribute("aria-invalid", "true");
+  } else {
+    accessCodeInput?.removeAttribute("aria-invalid");
+  }
 }
 
 function clearAccessCodeModalError() {
-  if (!accessCodeError) return;
-  accessCodeError.textContent = "";
-  accessCodeError.classList.add("hidden");
+  setAccessCodeModalError("");
 }
 
-function showAccessCodeModalError(message) {
-  if (!accessCodeError) return;
-  accessCodeError.textContent = message;
-  accessCodeError.classList.remove("hidden");
-  accessCodeInput?.setAttribute("aria-invalid", "true");
-}
+function handleInvalidAccessCode(request, options = {}) {
+  const { keepModalOpen = false } = options;
 
-function submitAccessCodeModal() {
-  if (!accessCodeModal || accessCodeModal.classList.contains("hidden")) return;
+  clearStoredAccessCode();
+  stopStatusSequence();
+  hideStatus();
+  clearError();
+  scrapeBtn.disabled = false;
+  setAccessCodeModalLoading(false);
 
-  const accessCode = accessCodeInput?.value?.trim() || "";
-  if (!accessCode) {
-    showAccessCodeModalError("Enter an access code to continue.");
+  if (keepModalOpen && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
+    pendingAccessCodeRequest = request;
+    setAccessCodeModalError(INVALID_ACCESS_CODE_MESSAGE);
+    setTimeout(() => {
+      accessCodeInput?.focus();
+      accessCodeInput?.select();
+    }, 0);
     return;
   }
 
-  const continuation = accessCodeContinuation;
-  saveAccessCode(accessCode);
-  closeAccessCodeModal();
+  openAccessCodeModal(request, { errorMessage: INVALID_ACCESS_CODE_MESSAGE });
+}
 
-  if (typeof continuation === "function") {
-    continuation(accessCode);
+async function submitAccessCodeModal() {
+  if (!accessCodeModal || accessCodeModal.classList.contains("hidden") || accessCodeChecking) return;
+
+  const accessCode = accessCodeInput?.value?.trim() || "";
+  if (!accessCode) {
+    setAccessCodeModalError("Enter an access code to continue.");
+    return;
+  }
+
+  const request = pendingAccessCodeRequest;
+  if (!request) return;
+
+  setAccessCodeModalError("");
+  setAccessCodeModalLoading(true);
+
+  try {
+    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode);
+    saveAccessCode(accessCode);
+    setAccessCodeModalLoading(false);
+    closeAccessCodeModal();
+    runExtractionWithAccessCode(request, accessCode, acceptedResponse);
+  } catch (e) {
+    if (isInvalidAccessCodeError(e)) {
+      handleInvalidAccessCode(request, { keepModalOpen: true });
+      return;
+    }
+
+    setAccessCodeModalLoading(false);
+    closeAccessCodeModal();
+    scrapeBtn.disabled = false;
+    if (isDebugMode()) renderDebugPanel();
+    showError("Extraction failed: " + e.message);
   }
 }
 

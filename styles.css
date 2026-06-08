@@ -248,6 +248,12 @@ input[type="checkbox"]:checked::after {
   transition: color .15s, border-color .15s;
 }
 .ghost-btn:hover { color: var(--text); border-color: var(--border-focus); }
+.secondary-btn:disabled,
+.ghost-btn:disabled,
+.modal-close:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
 
 .expand-btn {
   background: transparent;
