@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>UniScrape</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="styles.css" />
   <style>
     .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
@@ -29,7 +29,7 @@
   <header>
   <div class="header-inner">
     <div class="site-brand">
-      <img src="/favicon.svg" alt="" class="site-logo" aria-hidden="true" />
+      <img src="favicon.svg" alt="" class="site-logo" aria-hidden="true" />
       <div class="site-copy">
         <span class="site-title">UniScrape</span>
         <span class="site-sub">University Program Finder</span>
@@ -57,23 +57,6 @@
         </div>
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
-
-      <div class="field-group">
-  <label class="field-label">
-    Access Password
-    <span class="field-note">- required to use the extraction service</span>
-  </label>
-  <input
-    type="password"
-    id="accessPassword"
-    class="text-input"
-    placeholder="Enter access password"
-    autocomplete="off"
-  />
-  <p class="field-hint">
-    This password gives access to the UniScrape backend extraction API.
-  </p>
-</div>
 
       <div id="debugOptions" class="debug-options">
   <div class="debug-options-row">
@@ -223,10 +206,41 @@
       </div>
     </div>
 
+    <!-- Access Code Modal -->
+    <div id="accessCodeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="accessCodeTitle" aria-describedby="accessCodeHelp">
+      <div class="modal-box access-code-box">
+        <div class="modal-header">
+          <span id="accessCodeTitle" class="modal-title">Access Code</span>
+          <button id="accessCodeClose" type="button" class="modal-close" aria-label="Close access code dialog">x</button>
+        </div>
+        <div class="modal-body access-code-body">
+          <p id="accessCodeHelp" class="access-code-help">Enter the current UniScrape access code to continue.</p>
+          <div class="field-group">
+            <label for="accessCodeInput" class="field-label">Access Code</label>
+            <div class="access-code-input-row">
+              <input
+                type="password"
+                id="accessCodeInput"
+                class="text-input"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button id="accessCodeToggle" type="button" class="ghost-btn">Show</button>
+            </div>
+            <p id="accessCodeError" class="access-code-error hidden"></p>
+          </div>
+          <div class="access-code-actions">
+            <button id="accessCodeCancel" type="button" class="ghost-btn">Cancel</button>
+            <button id="accessCodeSubmit" type="button" class="primary-btn">Unlock &amp; Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <footer>
-    <p>Data sourced exclusively from official university websites. <span class="version-mark">v3.2</span></p>
+    <p>Data sourced exclusively from official university websites. <span class="version-mark">Version 4.0</span></p>
   </footer>
 
   <script src="app.js"></script>

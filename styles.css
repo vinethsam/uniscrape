@@ -601,6 +601,41 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   word-break: break-word;
 }
 
+.access-code-box {
+  max-width: 420px;
+}
+
+.access-code-body {
+  gap: .9rem;
+}
+
+.access-code-help {
+  font-size: .78rem;
+  color: var(--text-muted);
+}
+
+.access-code-input-row {
+  display: flex;
+  gap: .5rem;
+}
+
+.access-code-input-row .text-input {
+  min-width: 0;
+}
+
+.access-code-error {
+  color: var(--red);
+  font-size: .72rem;
+  margin-top: .15rem;
+}
+
+.access-code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
 /* ---- No results --------------------------------------------------- */
 .no-results {
   text-align: center;

@@ -1,10 +1,12 @@
 /*
-   UniScrape v3.2 - app.js
+   UniScrape v4.0 - app.js
 */
 
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
 const EXTRACT_TIMEOUT_MS = 300000;
+const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
+const INVALID_ACCESS_CODE_MESSAGE = "Access code incorrect. Please enter the latest access code and try again.";
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 
 // State
@@ -49,7 +51,6 @@ let debugState = {
 
 //DOM refs
 const urlInput         = document.getElementById("urlInput");
-const accessPasswordInput = document.getElementById("accessPassword");
 const apiHint          = document.getElementById("apiHint");
 const scrapeBtn        = document.getElementById("scrapeBtn");
 const statusSection    = document.getElementById("statusSection");
@@ -89,13 +90,27 @@ const copyMarkdownBtn  = document.getElementById("copyMarkdownBtn");
 const downloadPreviewBtn = document.getElementById("downloadPreviewBtn");
 const downloadApiResponseBtn = document.getElementById("downloadApiResponseBtn");
 const downloadFinalMdBtn = document.getElementById("downloadFinalMdBtn");
+const accessCodeModal = document.getElementById("accessCodeModal");
+const accessCodeInput = document.getElementById("accessCodeInput");
+const accessCodeToggle = document.getElementById("accessCodeToggle");
+const accessCodeSubmit = document.getElementById("accessCodeSubmit");
+const accessCodeCancel = document.getElementById("accessCodeCancel");
+const accessCodeClose = document.getElementById("accessCodeClose");
+const accessCodeError = document.getElementById("accessCodeError");
+
+let accessCodeContinuation = null;
 
 //Persist settings
-if (accessPasswordInput) {
-  accessPasswordInput.value = localStorage.getItem("uniscrape_access_password") || "";
-  accessPasswordInput.addEventListener("change", () => {
-    localStorage.setItem("uniscrape_access_password", accessPasswordInput.value.trim());
-  });
+function getStoredAccessCode() {
+  return (localStorage.getItem(UNISCRAPE_ACCESS_CODE_KEY) || "").trim();
+}
+
+function saveAccessCode(accessCode) {
+  localStorage.setItem(UNISCRAPE_ACCESS_CODE_KEY, String(accessCode || "").trim());
+}
+
+function clearStoredAccessCode() {
+  localStorage.removeItem(UNISCRAPE_ACCESS_CODE_KEY);
 }
 
 let debugUiVisible = false;
@@ -156,11 +171,21 @@ function stopStatusSequence() {
   }
 }
 
-async function useBackendExtract(url, debugOnly) {
-  const password = accessPasswordInput?.value?.trim() || "";
+function createInvalidAccessCodeError() {
+  const error = new Error(INVALID_ACCESS_CODE_MESSAGE);
+  error.code = "INVALID_ACCESS_CODE";
+  return error;
+}
 
-  if (!password) {
-    throw new Error("Please enter the access password.");
+function isInvalidAccessCodeError(error) {
+  return error?.code === "INVALID_ACCESS_CODE";
+}
+
+async function useBackendExtract(url, debugOnly, accessCode) {
+  const trimmedAccessCode = String(accessCode || "").trim();
+
+  if (!trimmedAccessCode) {
+    throw new Error("Please enter an access code.");
   }
 
   const res = await fetch(EXTRACT_API_URL, {
@@ -168,7 +193,7 @@ async function useBackendExtract(url, debugOnly) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url,
-      password,
+      password: trimmedAccessCode,
       debug: debugOnly,
     }),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
@@ -177,7 +202,7 @@ async function useBackendExtract(url, debugOnly) {
   const data = await res.json().catch(() => null);
 
   if (res.status === 401) {
-    throw new Error("Incorrect password. Please check and try again.");
+    throw createInvalidAccessCodeError();
   }
 
   if (res.status === 422) {
@@ -228,11 +253,18 @@ function updateDebugStateFromBackend(data) {
 }
 
 // Main flow
-scrapeBtn.addEventListener("click", runScrape);
-retryBtn.addEventListener("click", () => { clearError(); runScrape(); });
-urlInput.addEventListener("keydown", e => { if (e.key === "Enter") runScrape(); });
+scrapeBtn.addEventListener("click", handleExtractClick);
+retryBtn.addEventListener("click", () => { clearError(); handleExtractClick(); });
+urlInput.addEventListener("keydown", e => { if (e.key === "Enter") handleExtractClick(); });
 
-async function runScrape() {
+function handleExtractClick() {
+  const request = prepareExtractionRequest();
+  if (!request) return;
+
+  ensureAccessCodeThenRun(request);
+}
+
+function prepareExtractionRequest() {
   const url = urlInput.value.trim();
   const debugOnly = isDebugMode();
 
@@ -246,8 +278,30 @@ async function runScrape() {
   try {
     new URL(url);
   } catch {
-    return showError("That does not look like a valid URL.");
+    showError("That does not look like a valid URL.");
+    return null;
   }
+
+  return { url, debugOnly };
+}
+
+function ensureAccessCodeThenRun(request) {
+  const storedAccessCode = getStoredAccessCode();
+  if (storedAccessCode) {
+    runScrape(request, storedAccessCode);
+    return;
+  }
+
+  openAccessCodeModal(accessCode => runScrape(request, accessCode));
+}
+
+async function runScrape(request, accessCode) {
+  const { url, debugOnly } = request;
+
+  resetDebugState();
+  clearError();
+  hideResults();
+  hideDebugPanel();
 
   scrapeBtn.disabled = true;
   startStatusSequence([
@@ -263,7 +317,7 @@ async function runScrape() {
   let programs = [];
 
   try {
-    const result = await useBackendExtract(url, debugOnly);
+    const result = await useBackendExtract(url, debugOnly, accessCode);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -286,6 +340,12 @@ async function runScrape() {
     stopStatusSequence();
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
+    if (isInvalidAccessCodeError(e)) {
+      clearStoredAccessCode();
+      showError(INVALID_ACCESS_CODE_MESSAGE);
+      openAccessCodeModal(nextAccessCode => runScrape(request, nextAccessCode));
+      return;
+    }
     return showError("Extraction failed: " + e.message);
   }
 
@@ -306,6 +366,88 @@ async function runScrape() {
   renderResults(url);
   scrapeBtn.disabled = false;
 }
+
+function openAccessCodeModal(onUnlock) {
+  if (!accessCodeModal || !accessCodeInput) return;
+
+  accessCodeContinuation = onUnlock;
+  accessCodeInput.value = "";
+  accessCodeInput.type = "password";
+  accessCodeInput.removeAttribute("aria-invalid");
+  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
+  clearAccessCodeModalError();
+  accessCodeModal.classList.remove("hidden");
+  setTimeout(() => accessCodeInput.focus(), 0);
+}
+
+function closeAccessCodeModal() {
+  accessCodeModal?.classList.add("hidden");
+  accessCodeContinuation = null;
+  if (accessCodeInput) {
+    accessCodeInput.value = "";
+    accessCodeInput.type = "password";
+    accessCodeInput.removeAttribute("aria-invalid");
+  }
+  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
+  clearAccessCodeModalError();
+}
+
+function clearAccessCodeModalError() {
+  if (!accessCodeError) return;
+  accessCodeError.textContent = "";
+  accessCodeError.classList.add("hidden");
+}
+
+function showAccessCodeModalError(message) {
+  if (!accessCodeError) return;
+  accessCodeError.textContent = message;
+  accessCodeError.classList.remove("hidden");
+  accessCodeInput?.setAttribute("aria-invalid", "true");
+}
+
+function submitAccessCodeModal() {
+  if (!accessCodeModal || accessCodeModal.classList.contains("hidden")) return;
+
+  const accessCode = accessCodeInput?.value?.trim() || "";
+  if (!accessCode) {
+    showAccessCodeModalError("Enter an access code to continue.");
+    return;
+  }
+
+  const continuation = accessCodeContinuation;
+  saveAccessCode(accessCode);
+  closeAccessCodeModal();
+
+  if (typeof continuation === "function") {
+    continuation(accessCode);
+  }
+}
+
+accessCodeSubmit?.addEventListener("click", submitAccessCodeModal);
+accessCodeInput?.addEventListener("input", clearAccessCodeModalError);
+accessCodeInput?.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    submitAccessCodeModal();
+  }
+});
+accessCodeToggle?.addEventListener("click", () => {
+  if (!accessCodeInput || !accessCodeToggle) return;
+  const isHidden = accessCodeInput.type === "password";
+  accessCodeInput.type = isHidden ? "text" : "password";
+  accessCodeToggle.textContent = isHidden ? "Hide" : "Show";
+  accessCodeInput.focus();
+});
+accessCodeCancel?.addEventListener("click", closeAccessCodeModal);
+accessCodeClose?.addEventListener("click", closeAccessCodeModal);
+accessCodeModal?.addEventListener("click", e => {
+  if (e.target === accessCodeModal) closeAccessCodeModal();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
+    closeAccessCodeModal();
+  }
+});
 
 // Financial aid display helper
 function applyFinancialAidStatement(p) {
