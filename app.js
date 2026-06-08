@@ -5,8 +5,9 @@
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
 const EXTRACT_TIMEOUT_MS = 300000;
-const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
-const INVALID_ACCESS_CODE_MESSAGE = "Access code incorrect. Please enter the latest access code and try again.";
+const UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
+const LEGACY_UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
+const INVALID_ACCESS_KEY_MESSAGE = "Access key incorrect. Please enter the latest access key and try again.";
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 
 // State
@@ -90,30 +91,40 @@ const copyMarkdownBtn  = document.getElementById("copyMarkdownBtn");
 const downloadPreviewBtn = document.getElementById("downloadPreviewBtn");
 const downloadApiResponseBtn = document.getElementById("downloadApiResponseBtn");
 const downloadFinalMdBtn = document.getElementById("downloadFinalMdBtn");
-const accessCodeModal = document.getElementById("accessCodeModal");
-const accessCodeInput = document.getElementById("accessCodeInput");
-const accessCodeToggle = document.getElementById("accessCodeToggle");
-const accessCodeSubmit = document.getElementById("accessCodeSubmit");
-const accessCodeCancel = document.getElementById("accessCodeCancel");
-const accessCodeClose = document.getElementById("accessCodeClose");
-const accessCodeError = document.getElementById("accessCodeError");
+const accessKeyModal = document.getElementById("accessKeyModal");
+const accessKeyInput = document.getElementById("accessKeyInput");
+const accessKeyToggle = document.getElementById("accessKeyToggle");
+const accessKeySubmit = document.getElementById("accessKeySubmit");
+const accessKeyCancel = document.getElementById("accessKeyCancel");
+const accessKeyClose = document.getElementById("accessKeyClose");
+const accessKeyError = document.getElementById("accessKeyError");
 
-const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
-const ACCESS_CODE_CHECKING_LABEL = "Checking...";
-let pendingAccessCodeRequest = null;
-let accessCodeChecking = false;
+const ACCESS_KEY_SUBMIT_LABEL = "Unlock & Continue";
+const ACCESS_KEY_CHECKING_LABEL = "Checking...";
+let pendingAccessKeyRequest = null;
+let accessKeyChecking = false;
 
 //Persist settings
-function getStoredAccessCode() {
-  return (localStorage.getItem(UNISCRAPE_ACCESS_CODE_KEY) || "").trim();
+function getStoredAccessKey() {
+  const accessKey = (localStorage.getItem(UNISCRAPE_ACCESS_KEY_KEY) || "").trim();
+  const legacyAccessKey = (localStorage.getItem(LEGACY_UNISCRAPE_ACCESS_CODE_KEY) || "").trim();
+
+  if (accessKey) return accessKey;
+  if (legacyAccessKey) {
+    saveAccessKey(legacyAccessKey);
+    localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_CODE_KEY);
+  }
+  return legacyAccessKey;
 }
 
-function saveAccessCode(accessCode) {
-  localStorage.setItem(UNISCRAPE_ACCESS_CODE_KEY, String(accessCode || "").trim());
+function saveAccessKey(accessKey) {
+  localStorage.setItem(UNISCRAPE_ACCESS_KEY_KEY, String(accessKey || "").trim());
+  localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_CODE_KEY);
 }
 
-function clearStoredAccessCode() {
-  localStorage.removeItem(UNISCRAPE_ACCESS_CODE_KEY);
+function clearStoredAccessKey() {
+  localStorage.removeItem(UNISCRAPE_ACCESS_KEY_KEY);
+  localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_CODE_KEY);
 }
 
 let debugUiVisible = false;
@@ -174,21 +185,21 @@ function stopStatusSequence() {
   }
 }
 
-function createInvalidAccessCodeError() {
-  const error = new Error(INVALID_ACCESS_CODE_MESSAGE);
-  error.code = "INVALID_ACCESS_CODE";
+function createInvalidAccessKeyError() {
+  const error = new Error(INVALID_ACCESS_KEY_MESSAGE);
+  error.code = "INVALID_ACCESS_KEY";
   return error;
 }
 
-function isInvalidAccessCodeError(error) {
-  return error?.code === "INVALID_ACCESS_CODE";
+function isInvalidAccessKeyError(error) {
+  return error?.code === "INVALID_ACCESS_KEY";
 }
 
-async function sendBackendExtractRequest(url, debugOnly, accessCode) {
-  const trimmedAccessCode = String(accessCode || "").trim();
+async function sendBackendExtractRequest(url, debugOnly, accessKey) {
+  const trimmedAccessKey = String(accessKey || "").trim();
 
-  if (!trimmedAccessCode) {
-    throw new Error("Please enter an access code.");
+  if (!trimmedAccessKey) {
+    throw new Error("Please enter an access key.");
   }
 
   const res = await fetch(EXTRACT_API_URL, {
@@ -196,14 +207,14 @@ async function sendBackendExtractRequest(url, debugOnly, accessCode) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url,
-      password: trimmedAccessCode,
+      password: trimmedAccessKey,
       debug: debugOnly,
     }),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
 
   if (res.status === 401) {
-    throw createInvalidAccessCodeError();
+    throw createInvalidAccessKeyError();
   }
 
   return res;
@@ -229,8 +240,8 @@ async function readBackendExtractResponse(res) {
   return data;
 }
 
-async function useBackendExtract(url, debugOnly, accessCode) {
-  const res = await sendBackendExtractRequest(url, debugOnly, accessCode);
+async function useBackendExtract(url, debugOnly, accessKey) {
+  const res = await sendBackendExtractRequest(url, debugOnly, accessKey);
   return readBackendExtractResponse(res);
 }
 
@@ -273,7 +284,7 @@ function handleExtractClick() {
   const request = prepareExtractionRequest();
   if (!request) return;
 
-  ensureAccessCodeThenRun(request);
+  ensureAccessKeyThenRun(request);
 }
 
 function prepareExtractionRequest() {
@@ -297,17 +308,17 @@ function prepareExtractionRequest() {
   return { url, debugOnly };
 }
 
-function ensureAccessCodeThenRun(request) {
-  const storedAccessCode = getStoredAccessCode();
-  if (storedAccessCode) {
-    runExtractionWithAccessCode(request, storedAccessCode);
+function ensureAccessKeyThenRun(request) {
+  const storedAccessKey = getStoredAccessKey();
+  if (storedAccessKey) {
+    runExtractionWithAccessKey(request, storedAccessKey);
     return;
   }
 
-  openAccessCodeModal(request);
+  openAccessKeyModal(request);
 }
 
-async function runExtractionWithAccessCode(request, accessCode, acceptedResponse = null) {
+async function runExtractionWithAccessKey(request, accessKey, acceptedResponse = null) {
   const { url, debugOnly } = request;
 
   resetDebugState();
@@ -331,7 +342,7 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   try {
     const result = acceptedResponse
       ? await readBackendExtractResponse(acceptedResponse)
-      : await useBackendExtract(url, debugOnly, accessCode);
+      : await useBackendExtract(url, debugOnly, accessKey);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -354,8 +365,8 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
     stopStatusSequence();
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
-    if (isInvalidAccessCodeError(e)) {
-      handleInvalidAccessCode(request);
+    if (isInvalidAccessKeyError(e)) {
+      handleInvalidAccessKey(request);
       return;
     }
     return showError("Extraction failed: " + e.message);
@@ -379,148 +390,148 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   scrapeBtn.disabled = false;
 }
 
-function openAccessCodeModal(request, options = {}) {
-  if (!accessCodeModal || !accessCodeInput) return;
+function openAccessKeyModal(request, options = {}) {
+  if (!accessKeyModal || !accessKeyInput) return;
 
   const { errorMessage = "", preserveValue = false } = options;
-  pendingAccessCodeRequest = request;
-  if (!preserveValue) accessCodeInput.value = "";
-  accessCodeInput.type = "password";
-  accessCodeInput.removeAttribute("aria-invalid");
-  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
-  setAccessCodeModalLoading(false);
-  setAccessCodeModalError(errorMessage);
-  accessCodeModal.classList.remove("hidden");
+  pendingAccessKeyRequest = request;
+  if (!preserveValue) accessKeyInput.value = "";
+  accessKeyInput.type = "password";
+  accessKeyInput.removeAttribute("aria-invalid");
+  if (accessKeyToggle) accessKeyToggle.textContent = "Show";
+  setAccessKeyModalLoading(false);
+  setAccessKeyModalError(errorMessage);
+  accessKeyModal.classList.remove("hidden");
   setTimeout(() => {
-    accessCodeInput.focus();
-    if (errorMessage || preserveValue) accessCodeInput.select();
+    accessKeyInput.focus();
+    if (errorMessage || preserveValue) accessKeyInput.select();
   }, 0);
 }
 
-function closeAccessCodeModal() {
-  if (accessCodeChecking) return;
+function closeAccessKeyModal() {
+  if (accessKeyChecking) return;
 
-  accessCodeModal?.classList.add("hidden");
-  pendingAccessCodeRequest = null;
-  if (accessCodeInput) {
-    accessCodeInput.value = "";
-    accessCodeInput.type = "password";
-    accessCodeInput.removeAttribute("aria-invalid");
+  accessKeyModal?.classList.add("hidden");
+  pendingAccessKeyRequest = null;
+  if (accessKeyInput) {
+    accessKeyInput.value = "";
+    accessKeyInput.type = "password";
+    accessKeyInput.removeAttribute("aria-invalid");
   }
-  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
-  setAccessCodeModalLoading(false);
-  setAccessCodeModalError("");
+  if (accessKeyToggle) accessKeyToggle.textContent = "Show";
+  setAccessKeyModalLoading(false);
+  setAccessKeyModalError("");
 }
 
-function setAccessCodeModalLoading(isLoading) {
-  accessCodeChecking = Boolean(isLoading);
+function setAccessKeyModalLoading(isLoading) {
+  accessKeyChecking = Boolean(isLoading);
 
-  if (accessCodeInput) accessCodeInput.disabled = accessCodeChecking;
-  if (accessCodeToggle) accessCodeToggle.disabled = accessCodeChecking;
-  if (accessCodeCancel) accessCodeCancel.disabled = accessCodeChecking;
-  if (accessCodeClose) accessCodeClose.disabled = accessCodeChecking;
-  if (accessCodeSubmit) {
-    accessCodeSubmit.disabled = accessCodeChecking;
-    accessCodeSubmit.textContent = accessCodeChecking ? ACCESS_CODE_CHECKING_LABEL : ACCESS_CODE_SUBMIT_LABEL;
+  if (accessKeyInput) accessKeyInput.disabled = accessKeyChecking;
+  if (accessKeyToggle) accessKeyToggle.disabled = accessKeyChecking;
+  if (accessKeyCancel) accessKeyCancel.disabled = accessKeyChecking;
+  if (accessKeyClose) accessKeyClose.disabled = accessKeyChecking;
+  if (accessKeySubmit) {
+    accessKeySubmit.disabled = accessKeyChecking;
+    accessKeySubmit.textContent = accessKeyChecking ? ACCESS_KEY_CHECKING_LABEL : ACCESS_KEY_SUBMIT_LABEL;
   }
 }
 
-function setAccessCodeModalError(message) {
-  if (!accessCodeError) return;
-  accessCodeError.textContent = message || "";
-  accessCodeError.classList.toggle("hidden", !message);
+function setAccessKeyModalError(message) {
+  if (!accessKeyError) return;
+  accessKeyError.textContent = message || "";
+  accessKeyError.classList.toggle("hidden", !message);
   if (message) {
-    accessCodeInput?.setAttribute("aria-invalid", "true");
+    accessKeyInput?.setAttribute("aria-invalid", "true");
   } else {
-    accessCodeInput?.removeAttribute("aria-invalid");
+    accessKeyInput?.removeAttribute("aria-invalid");
   }
 }
 
-function clearAccessCodeModalError() {
-  setAccessCodeModalError("");
+function clearAccessKeyModalError() {
+  setAccessKeyModalError("");
 }
 
-function handleInvalidAccessCode(request, options = {}) {
+function handleInvalidAccessKey(request, options = {}) {
   const { keepModalOpen = false } = options;
 
-  clearStoredAccessCode();
+  clearStoredAccessKey();
   stopStatusSequence();
   hideStatus();
   clearError();
   scrapeBtn.disabled = false;
-  setAccessCodeModalLoading(false);
+  setAccessKeyModalLoading(false);
 
-  if (keepModalOpen && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
-    pendingAccessCodeRequest = request;
-    setAccessCodeModalError(INVALID_ACCESS_CODE_MESSAGE);
+  if (keepModalOpen && accessKeyModal && !accessKeyModal.classList.contains("hidden")) {
+    pendingAccessKeyRequest = request;
+    setAccessKeyModalError(INVALID_ACCESS_KEY_MESSAGE);
     setTimeout(() => {
-      accessCodeInput?.focus();
-      accessCodeInput?.select();
+      accessKeyInput?.focus();
+      accessKeyInput?.select();
     }, 0);
     return;
   }
 
-  openAccessCodeModal(request, { errorMessage: INVALID_ACCESS_CODE_MESSAGE });
+  openAccessKeyModal(request, { errorMessage: INVALID_ACCESS_KEY_MESSAGE });
 }
 
-async function submitAccessCodeModal() {
-  if (!accessCodeModal || accessCodeModal.classList.contains("hidden") || accessCodeChecking) return;
+async function submitAccessKeyModal() {
+  if (!accessKeyModal || accessKeyModal.classList.contains("hidden") || accessKeyChecking) return;
 
-  const accessCode = accessCodeInput?.value?.trim() || "";
-  if (!accessCode) {
-    setAccessCodeModalError("Enter an access code to continue.");
+  const accessKey = accessKeyInput?.value?.trim() || "";
+  if (!accessKey) {
+    setAccessKeyModalError("Enter an access key to continue.");
     return;
   }
 
-  const request = pendingAccessCodeRequest;
+  const request = pendingAccessKeyRequest;
   if (!request) return;
 
-  setAccessCodeModalError("");
-  setAccessCodeModalLoading(true);
+  setAccessKeyModalError("");
+  setAccessKeyModalLoading(true);
 
   try {
-    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode);
-    saveAccessCode(accessCode);
-    setAccessCodeModalLoading(false);
-    closeAccessCodeModal();
-    runExtractionWithAccessCode(request, accessCode, acceptedResponse);
+    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessKey);
+    saveAccessKey(accessKey);
+    setAccessKeyModalLoading(false);
+    closeAccessKeyModal();
+    runExtractionWithAccessKey(request, accessKey, acceptedResponse);
   } catch (e) {
-    if (isInvalidAccessCodeError(e)) {
-      handleInvalidAccessCode(request, { keepModalOpen: true });
+    if (isInvalidAccessKeyError(e)) {
+      handleInvalidAccessKey(request, { keepModalOpen: true });
       return;
     }
 
-    setAccessCodeModalLoading(false);
-    closeAccessCodeModal();
+    setAccessKeyModalLoading(false);
+    closeAccessKeyModal();
     scrapeBtn.disabled = false;
     if (isDebugMode()) renderDebugPanel();
     showError("Extraction failed: " + e.message);
   }
 }
 
-accessCodeSubmit?.addEventListener("click", submitAccessCodeModal);
-accessCodeInput?.addEventListener("input", clearAccessCodeModalError);
-accessCodeInput?.addEventListener("keydown", e => {
+accessKeySubmit?.addEventListener("click", submitAccessKeyModal);
+accessKeyInput?.addEventListener("input", clearAccessKeyModalError);
+accessKeyInput?.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
-    submitAccessCodeModal();
+    submitAccessKeyModal();
   }
 });
-accessCodeToggle?.addEventListener("click", () => {
-  if (!accessCodeInput || !accessCodeToggle) return;
-  const isHidden = accessCodeInput.type === "password";
-  accessCodeInput.type = isHidden ? "text" : "password";
-  accessCodeToggle.textContent = isHidden ? "Hide" : "Show";
-  accessCodeInput.focus();
+accessKeyToggle?.addEventListener("click", () => {
+  if (!accessKeyInput || !accessKeyToggle) return;
+  const isHidden = accessKeyInput.type === "password";
+  accessKeyInput.type = isHidden ? "text" : "password";
+  accessKeyToggle.textContent = isHidden ? "Hide" : "Show";
+  accessKeyInput.focus();
 });
-accessCodeCancel?.addEventListener("click", closeAccessCodeModal);
-accessCodeClose?.addEventListener("click", closeAccessCodeModal);
-accessCodeModal?.addEventListener("click", e => {
-  if (e.target === accessCodeModal) closeAccessCodeModal();
+accessKeyCancel?.addEventListener("click", closeAccessKeyModal);
+accessKeyClose?.addEventListener("click", closeAccessKeyModal);
+accessKeyModal?.addEventListener("click", e => {
+  if (e.target === accessKeyModal) closeAccessKeyModal();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
-    closeAccessCodeModal();
+  if (e.key === "Escape" && accessKeyModal && !accessKeyModal.classList.contains("hidden")) {
+    closeAccessKeyModal();
   }
 });
 

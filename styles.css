@@ -607,35 +607,35 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   word-break: break-word;
 }
 
-.access-code-box {
+.access-key-box {
   max-width: 420px;
 }
 
-.access-code-body {
+.access-key-body {
   gap: .9rem;
 }
 
-.access-code-help {
+.access-key-help {
   font-size: .78rem;
   color: var(--text-muted);
 }
 
-.access-code-input-row {
+.access-key-input-row {
   display: flex;
   gap: .5rem;
 }
 
-.access-code-input-row .text-input {
+.access-key-input-row .text-input {
   min-width: 0;
 }
 
-.access-code-error {
+.access-key-error {
   color: var(--red);
   font-size: .72rem;
   margin-top: .15rem;
 }
 
-.access-code-actions {
+.access-key-actions {
   display: flex;
   justify-content: flex-end;
   gap: .5rem;
