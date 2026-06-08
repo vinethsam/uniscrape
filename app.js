@@ -104,6 +104,25 @@ const ACCESS_CODE_CHECKING_LABEL = "Checking...";
 let pendingAccessCodeRequest = null;
 let accessCodeChecking = false;
 
+function showAccessCodeModalElement() {
+  if (!accessCodeModal) return;
+  accessCodeModal.removeAttribute("hidden");
+  accessCodeModal.hidden = false;
+  accessCodeModal.classList.remove("hidden");
+  accessCodeModal.setAttribute("aria-hidden", "false");
+}
+
+function hideAccessCodeModalElement() {
+  if (!accessCodeModal) return;
+  accessCodeModal.classList.add("hidden");
+  accessCodeModal.setAttribute("hidden", "");
+  accessCodeModal.setAttribute("aria-hidden", "true");
+}
+
+function isAccessCodeModalOpen() {
+  return Boolean(accessCodeModal && !accessCodeModal.hidden && !accessCodeModal.classList.contains("hidden"));
+}
+
 //Persist settings
 function getStoredAccessCode() {
   const accessCode = (localStorage.getItem(UNISCRAPE_ACCESS_CODE_KEY) || "").trim();
@@ -401,8 +420,7 @@ function openAccessCodeModal(request, options = {}) {
   if (accessCodeToggle) accessCodeToggle.textContent = "Show";
   setAccessCodeModalLoading(false);
   setAccessCodeModalError(errorMessage);
-  accessCodeModal.classList.remove("hidden");
-  accessCodeModal.setAttribute("aria-hidden", "false");
+  showAccessCodeModalElement();
   setTimeout(() => {
     accessCodeInput.focus();
     if (errorMessage || preserveValue) accessCodeInput.select();
@@ -414,8 +432,7 @@ function closeAccessCodeModal(options = {}) {
   if (accessCodeChecking && !force) return;
 
   setAccessCodeModalLoading(false);
-  accessCodeModal?.classList.add("hidden");
-  accessCodeModal?.setAttribute("aria-hidden", "true");
+  hideAccessCodeModalElement();
   pendingAccessCodeRequest = null;
   if (accessCodeInput) {
     accessCodeInput.value = "";
@@ -464,7 +481,7 @@ function handleInvalidAccessCode(request, options = {}) {
   scrapeBtn.disabled = false;
   setAccessCodeModalLoading(false);
 
-  if (keepModalOpen && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
+  if (keepModalOpen && isAccessCodeModalOpen()) {
     pendingAccessCodeRequest = request;
     setAccessCodeModalError(INVALID_ACCESS_CODE_MESSAGE);
     setTimeout(() => {
@@ -478,7 +495,7 @@ function handleInvalidAccessCode(request, options = {}) {
 }
 
 async function submitAccessCodeModal() {
-  if (!accessCodeModal || accessCodeModal.classList.contains("hidden") || accessCodeChecking) return;
+  if (!isAccessCodeModalOpen() || accessCodeChecking) return;
 
   const accessCode = accessCodeInput?.value?.trim() || "";
   if (!accessCode) {
@@ -496,6 +513,7 @@ async function submitAccessCodeModal() {
     const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode);
     saveAccessCode(accessCode);
     closeAccessCodeModal({ force: true });
+    await nextFrame();
     runExtractionWithAccessCode(request, accessCode, acceptedResponse);
   } catch (e) {
     if (isInvalidAccessCodeError(e)) {
@@ -532,7 +550,7 @@ accessCodeModal?.addEventListener("click", e => {
   if (e.target === accessCodeModal) closeAccessCodeModal();
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && accessCodeModal && !accessCodeModal.classList.contains("hidden")) {
+  if (e.key === "Escape" && isAccessCodeModalOpen()) {
     closeAccessCodeModal();
   }
 });
@@ -1673,6 +1691,7 @@ function clearError()  {
 }
 function hideResults() { resultsSection.classList.add("hidden"); }
 function sleep(ms)     { return new Promise(r => setTimeout(r, ms)); }
+function nextFrame()   { return new Promise(r => requestAnimationFrame(r)); }
 function esc(str) {
   return String(str)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
