@@ -9,11 +9,13 @@ const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
 const LEGACY_UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
 const INVALID_ACCESS_CODE_MESSAGE = "Access code incorrect. Please enter the latest access code and try again.";
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
+const DEFAULT_CONTENT_MODE = "auto";
 
 // State
 let allPrograms = [];
 let activeResultsMode = "audit";
 let catalogModeEnabled = false;
+let contentDiagnosticsEnabled = false;
 let sortCol = null;
 let sortDir = 1;
 
@@ -81,10 +83,12 @@ const filterScholarship= document.getElementById("filterScholarship");
 const filterDept       = document.getElementById("filterDept");
 const debugOptionsEl   = document.getElementById("debugOptions");
 const debugModeInput   = document.getElementById("debugMode");
-const contentModeSelect= document.getElementById("contentMode");
+const contentDiagnosticsToggleInput = document.getElementById("contentDiagnosticsToggle");
+const contentModeInputs = Array.from(document.querySelectorAll('input[name="contentMode"]'));
 const settingsMenuToggle = document.getElementById("settingsMenuToggle");
 const settingsMenuButton = document.querySelector(".settings-menu-button");
 const settingsPanel = document.getElementById("settingsPanel");
+const settingsMenuBackdrop = document.getElementById("settingsMenuBackdrop");
 const catalogToggleInput = document.getElementById("catalogToggle");
 const debugPanel       = document.getElementById("debugPanel");
 const debugStatsEl     = document.getElementById("debugStats");
@@ -224,7 +228,17 @@ if (debugModeInput) {
   debugModeInput.checked = localStorage.getItem("uniscrape_debug") === "1";
   debugModeInput.addEventListener("change", () => {
     localStorage.setItem("uniscrape_debug", debugModeInput.checked ? "1" : "0");
-    if (!debugModeInput.checked) hideDebugPanel();
+  });
+}
+if (contentDiagnosticsToggleInput) {
+  contentDiagnosticsToggleInput.checked = false;
+  contentDiagnosticsToggleInput.addEventListener("change", () => {
+    contentDiagnosticsEnabled = contentDiagnosticsToggleInput.checked;
+    if (contentDiagnosticsEnabled) {
+      renderDebugPanel();
+    } else {
+      hideDebugPanel();
+    }
   });
 }
 if (catalogToggleInput) {
@@ -233,10 +247,12 @@ if (catalogToggleInput) {
     catalogModeEnabled = catalogToggleInput.checked;
   });
 }
-if (contentModeSelect) {
-  contentModeSelect.value = localStorage.getItem("uniscrape_content_mode") || "auto";
-  contentModeSelect.addEventListener("change", () => {
-    localStorage.setItem("uniscrape_content_mode", contentModeSelect.value);
+if (contentModeInputs.length) {
+  setSelectedContentMode(localStorage.getItem("uniscrape_content_mode") || DEFAULT_CONTENT_MODE);
+  contentModeInputs.forEach(input => {
+    input.addEventListener("change", () => {
+      if (input.checked) localStorage.setItem("uniscrape_content_mode", getSelectedContentMode());
+    });
   });
 }
 
@@ -466,16 +482,16 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
     if (!programs.length) {
       stopStatusSequence();
       scrapeBtn.disabled = false;
-      if (isDebugMode()) renderDebugPanel();
+      if (shouldShowContentDiagnostics()) renderDebugPanel();
       const emptyMessage = activeResultsMode === "catalog"
-        ? "No catalog rows were extracted. Enable debug mode and re-run to inspect what the backend received."
-        : "No programs were extracted. Enable debug mode and re-run to inspect what the backend received.";
+        ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
+        : "No programs were extracted. Turn on Content diagnostics to inspect what the backend received.";
       return showError(emptyMessage);
     }
   } catch (e) {
     stopStatusSequence();
     scrapeBtn.disabled = false;
-    if (isDebugMode()) renderDebugPanel();
+    if (shouldShowContentDiagnostics()) renderDebugPanel();
     if (isInvalidAccessCodeError(e)) {
       handleInvalidAccessCode(request);
       return;
@@ -500,6 +516,7 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   await sleep(250);
   hideStatus();
   renderResults(url);
+  if (shouldShowContentDiagnostics()) renderDebugPanel();
   scrapeBtn.disabled = false;
 }
 
@@ -618,7 +635,7 @@ async function submitAccessCodeModal() {
     setAccessCodeModalLoading(false);
     closeAccessCodeModal({ force: true });
     scrapeBtn.disabled = false;
-    if (isDebugMode()) renderDebugPanel();
+    if (shouldShowContentDiagnostics()) renderDebugPanel();
     showError("Extraction failed: " + e.message);
   }
 }
@@ -730,6 +747,7 @@ function setSettingsMenuOpen(isOpen) {
 
   settingsMenuToggle.checked = Boolean(isOpen);
   settingsPanel.hidden = !isOpen;
+  if (settingsMenuBackdrop) settingsMenuBackdrop.hidden = !isOpen;
   settingsMenuButton.setAttribute("aria-expanded", String(Boolean(isOpen)));
   settingsMenuButton.setAttribute("aria-label", isOpen ? "Close settings menu" : "Open settings menu");
 }
@@ -807,6 +825,24 @@ function isCatalogMode() {
   return catalogModeEnabled;
 }
 
+function shouldShowContentDiagnostics() {
+  contentDiagnosticsEnabled = Boolean(contentDiagnosticsToggleInput?.checked);
+  return contentDiagnosticsEnabled;
+}
+
+function getSelectedContentMode() {
+  const selected = contentModeInputs.find(input => input.checked);
+  return selected?.value || DEFAULT_CONTENT_MODE;
+}
+
+function setSelectedContentMode(value) {
+  const nextValue = contentModeInputs.some(input => input.value === value) ? value : DEFAULT_CONTENT_MODE;
+  contentModeInputs.forEach(input => {
+    input.checked = input.value === nextValue;
+  });
+  localStorage.setItem("uniscrape_content_mode", nextValue);
+}
+
 function downloadTextFile(filename, content) {
   const blob = new Blob([content || ""], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -836,7 +872,7 @@ async function copyMarkdownPreview() {
 }
 
 function renderDebugPanel() {
-  if (!isDebugMode() || !debugPanel || !debugStatsEl) return;
+  if (!shouldShowContentDiagnostics() || !debugPanel || !debugStatsEl) return;
 
   const rd = debugState.renderApi || {};
   const be = debugState.backend || {};

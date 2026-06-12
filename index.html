@@ -72,6 +72,14 @@
           </label>
 
           <label class="settings-row settings-row-toggle">
+            <span>Content diagnostics</span>
+            <span class="switch">
+              <input type="checkbox" id="contentDiagnosticsToggle" />
+              <span class="slider" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="settings-row settings-row-toggle">
             <span>Bassa Mode</span>
             <span class="switch">
               <input type="checkbox" id="catalogToggle" />
@@ -80,18 +88,29 @@
           </label>
 
           <div class="settings-row settings-row-column">
-            <label for="contentMode" class="field-label">Content body</label>
-            <select id="contentMode" class="text-input settings-select">
-              <option value="auto">Auto</option>
-              <option value="best">Best content</option>
-              <option value="body">Full body</option>
-            </select>
+            <div id="contentModeLabel" class="field-label">Content body</div>
+            <div class="radio-inputs content-mode-radios" role="radiogroup" aria-labelledby="contentModeLabel">
+              <label class="radio" for="contentModeAuto">
+                <input type="radio" id="contentModeAuto" name="contentMode" value="auto" checked />
+                <span class="name">Auto</span>
+              </label>
+              <label class="radio" for="contentModeBest">
+                <input type="radio" id="contentModeBest" name="contentMode" value="best" />
+                <span class="name">Best content</span>
+              </label>
+              <label class="radio" for="contentModeBody">
+                <input type="radio" id="contentModeBody" name="contentMode" value="body" />
+                <span class="name">Full body</span>
+              </label>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 </header>
+
+<div id="settingsMenuBackdrop" class="settings-menu-backdrop" hidden></div>
 
   <main>
 
@@ -115,7 +134,7 @@
 
     </section>
 
-    <!-- Debug (visible only when debug mode is on and after cleaning) -->
+    <!-- Content diagnostics (visible only when the diagnostics toggle is on) -->
     <section id="debugPanel" class="panel debug-panel hidden">
       <div class="debug-title">Content diagnostics</div>
       <div id="debugStats" class="debug-stats"></div>
