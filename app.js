@@ -1545,7 +1545,7 @@ function mapSubjects(program) {
 
 //Render results
 function isCatalogResponse(result) {
-  return result?.extractionMode === "catalog" || Array.isArray(result?.catalogRows);
+  return result?.extractionMode === "catalog";
 }
 
 function normalizeCatalogRows(rows) {
