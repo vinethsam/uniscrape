@@ -134,6 +134,9 @@ const CATALOG_TABLE_HEADER_HTML = `
   <th>Credits unit</th>
   <th>Duration</th>
   <th>Fees</th>
+  <th>Location</th>
+  <th>Language</th>
+  <th>Mode of study</th>
 `;
 
 const AUDIT_CSV_COLUMNS = [
@@ -158,7 +161,10 @@ const CATALOG_CSV_COLUMNS = [
   "credits",
   "creditsUnit",
   "duration",
-  "fees"
+  "fees",
+  "location",
+  "language",
+  "modeOfStudy"
 ];
 
 const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
@@ -1560,6 +1566,9 @@ function normalizeCatalogRows(rows) {
     creditsUnit: row?.creditsUnit || "",
     duration: row?.duration || "",
     fees: row?.fees || "",
+    location: row?.location || "",
+    language: row?.language || "",
+    modeOfStudy: row?.modeOfStudy || "",
   }));
 }
 
@@ -1689,6 +1698,9 @@ function renderCatalogTable(rows) {
       <td>${catalogCell(row.creditsUnit)}</td>
       <td>${catalogCell(row.duration)}</td>
       <td>${catalogCell(row.fees)}</td>
+      <td>${catalogCell(row.location)}</td>
+      <td>${catalogCell(row.language)}</td>
+      <td>${catalogCell(row.modeOfStudy)}</td>
     </tr>
   `).join("");
 }
