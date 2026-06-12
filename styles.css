@@ -22,6 +22,8 @@
   --radius:      4px;
   --toggle-off-bg: var(--bg);
   --toggle-thumb:  var(--accent);
+  --button-hover-shadow: 0 6px 16px rgba(0, 0, 0, .24);
+  --button-active-shadow: 0 2px 6px rgba(0, 0, 0, .18);
 }
 
 /* ---- Base --------------------------------------------------------- */
@@ -236,7 +238,7 @@ header {
   border: 1px solid var(--border-focus);
   border-radius: calc(var(--button-height) / 2);
   position: relative;
-  transition: 0.3s all ease-in-out;
+  transition: 200ms all cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .slider::after {
@@ -251,7 +253,7 @@ header {
   transform: translateX(calc(var(--button-toggle-offset) - 1px));
   box-shadow: var(--toggle-shadow-offset) 0
     calc(var(--toggle-shadow-offset) * 4) rgba(0, 0, 0, 0.18);
-  transition: 0.3s all ease-in-out;
+  transition: 200ms all cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .switch input[type="checkbox"] {
@@ -487,6 +489,55 @@ input[type="checkbox"]:checked::after {
   transition: border-color .15s;
 }
 .expand-btn:hover { border-color: var(--blue); }
+
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.expand-btn,
+.modal-close {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    opacity 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.primary-btn:not(:disabled):hover,
+.secondary-btn:not(:disabled):hover,
+.ghost-btn:not(:disabled):hover,
+.expand-btn:not(:disabled):hover,
+.modal-close:not(:disabled):hover,
+.primary-btn:focus-visible,
+.secondary-btn:focus-visible,
+.ghost-btn:focus-visible,
+.expand-btn:focus-visible,
+.modal-close:focus-visible {
+  box-shadow: var(--button-hover-shadow);
+  transform: translateY(-1px);
+}
+
+.primary-btn:not(:disabled):active,
+.secondary-btn:not(:disabled):active,
+.ghost-btn:not(:disabled):active,
+.expand-btn:not(:disabled):active,
+.modal-close:not(:disabled):active {
+  box-shadow: var(--button-active-shadow);
+  transform: translateY(0);
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.ghost-btn:disabled,
+.modal-close:disabled {
+  box-shadow: none;
+  transform: none;
+}
 
 /* ---- Status ------------------------------------------------------- */
 .status-panel { gap: .75rem; }
