@@ -23,12 +23,7 @@
   <style>
     .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
     .error-retry-btn { align-self: flex-start; }
-    #debugOptions { display: none; flex-wrap: wrap; gap: 1.25rem 2rem; align-items: flex-end; padding-top: 0.25rem; border-top: 1px solid var(--border, #2a2a2a); margin-top: 0.25rem; }
-    #debugOptions.debug-options--visible { display: flex; }
     .version-mark { color: var(--text-dim, #3a3a3a); font-size: 0.85em; }
-    .debug-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; color: var(--text-muted, #666); cursor: pointer; }
-    .debug-check input { accent-color: var(--green, #4ec994); }
-    .content-mode-group { min-width: 160px; }
     .debug-panel .debug-title { font-size: 0.72rem; font-weight: 600; color: var(--accent-dim, #888); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.75rem; }
     .debug-stats { display: grid; gap: 0.35rem; font-size: 0.78rem; margin-bottom: 1rem; }
     .debug-k { color: var(--text-muted, #666); margin-right: 0.35rem; }
@@ -47,6 +42,51 @@
       <div class="site-copy">
         <span class="site-title">UniScrape</span>
         <span class="site-sub">University programme extraction tool</span>
+      </div>
+    </div>
+    <div class="settings-menu">
+      <label
+        class="hamburger settings-menu-button"
+        role="button"
+        tabindex="0"
+        aria-label="Open settings menu"
+        aria-controls="settingsPanel"
+        aria-expanded="false"
+      >
+        <input type="checkbox" id="settingsMenuToggle" aria-hidden="true" tabindex="-1" />
+        <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <path class="line line-top-bottom" d="M27 10H13C10.8 10 9 8.2 9 6s1.8-4 4-4 4 1.8 4 4v20c0 2.2-1.8 4-4 4s-4-1.8-4-4 1.8-4 4-4h14"></path>
+          <path class="line" d="M7 16h18"></path>
+        </svg>
+      </label>
+
+      <div id="settingsPanel" class="settings-panel" hidden>
+        <div id="debugOptions" class="debug-options">
+          <label class="settings-row settings-row-toggle">
+            <span>Debug mode</span>
+            <span class="switch">
+              <input type="checkbox" id="debugMode" />
+              <span class="slider" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <label class="settings-row settings-row-toggle">
+            <span>Catalog mode</span>
+            <span class="switch">
+              <input type="checkbox" id="catalogToggle" />
+              <span class="slider" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <div class="settings-row settings-row-column">
+            <label for="contentMode" class="field-label">Content body</label>
+            <select id="contentMode" class="text-input settings-select">
+              <option value="auto">Auto</option>
+              <option value="best">Best content</option>
+              <option value="body">Full body</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -72,23 +112,6 @@
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
 
-      <div id="debugOptions" class="debug-options">
-  <div class="debug-options-row">
-    <label class="debug-toggle">
-      <input type="checkbox" id="debugMode" />
-      <span>Debug mode - save raw and cleaned content</span>
-    </label>
-
-    <div class="debug-content-mode">
-      <label for="contentMode" class="field-label">Content mode</label>
-      <select id="contentMode" class="text-input">
-        <option value="auto">Auto</option>
-        <option value="best">Best content</option>
-        <option value="body">Full body</option>
-      </select>
-    </div>
-  </div>
-</div>
     </section>
 
     <!-- Debug (visible only when debug mode is on and after cleaning) -->

@@ -20,6 +20,8 @@
   --text-dim:    #3a3a3a;
   --font:        'JetBrains Mono', 'Courier New', monospace;
   --radius:      4px;
+  --toggle-off-bg: var(--bg);
+  --toggle-thumb:  var(--accent);
 }
 
 /* ---- Base --------------------------------------------------------- */
@@ -44,10 +46,12 @@ header {
 .header-inner {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
+  position: relative;
 }
 .site-brand {
   display: flex;
@@ -82,13 +86,219 @@ header {
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* ---- Settings menu ------------------------------------------------ */
+.settings-menu {
+  position: relative;
+  margin-left: auto;
+  flex: 0 0 auto;
+  z-index: 50;
+}
+
+.settings-menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color .15s, background .15s;
+}
+
+.settings-menu-button:hover,
+.settings-menu-button:focus-visible {
+  border-color: var(--border-focus);
+  background: var(--surface2);
+  outline: none;
+}
+
+.hamburger {
+  cursor: pointer;
+}
+
+.hamburger input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hamburger svg {
+  width: 24px;
+  height: 24px;
+  transition: transform 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  transition: stroke-dasharray 600ms cubic-bezier(0.4, 0, 0.2, 1),
+              stroke-dashoffset 600ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.line-top-bottom {
+  stroke-dasharray: 12 63;
+}
+
+.hamburger input:checked + svg {
+  transform: rotate(-45deg);
+}
+
+.hamburger input:checked + svg .line-top-bottom {
+  stroke-dasharray: 20 300;
+  stroke-dashoffset: -32.42;
+}
+
+.settings-panel {
+  position: absolute;
+  top: calc(100% + .55rem);
+  right: 0;
+  min-width: 240px;
+  max-width: calc(100vw - 2rem);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-panel .debug-options {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .85rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text);
+  font-size: .76rem;
+  line-height: 1.3;
+}
+
+.settings-row-toggle {
+  cursor: pointer;
+}
+
+.settings-row-column {
+  align-items: stretch;
+  flex-direction: column;
+  gap: .45rem;
+}
+
+.settings-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.switch {
+  --button-width: 3.5em;
+  --button-height: 2em;
+  --toggle-diameter: 1.5em;
+  --button-toggle-offset: calc((var(--button-height) - var(--toggle-diameter)) / 2);
+  --toggle-shadow-offset: 10px;
+  --toggle-wider: 3em;
+  --color-off: var(--toggle-off-bg);
+  --color-green: var(--green);
+  display: inline-flex;
+  position: relative;
+  flex: 0 0 auto;
+  font-size: .72rem;
+}
+
+.slider {
+  display: inline-block;
+  width: var(--button-width);
+  height: var(--button-height);
+  background-color: var(--color-off);
+  border: 1px solid var(--border-focus);
+  border-radius: calc(var(--button-height) / 2);
+  position: relative;
+  transition: 0.3s all ease-in-out;
+}
+
+.slider::after {
+  content: "";
+  display: inline-block;
+  width: var(--toggle-diameter);
+  height: var(--toggle-diameter);
+  background-color: var(--toggle-thumb);
+  border-radius: calc(var(--toggle-diameter) / 2);
+  position: absolute;
+  top: calc(var(--button-toggle-offset) - 1px);
+  transform: translateX(calc(var(--button-toggle-offset) - 1px));
+  box-shadow: var(--toggle-shadow-offset) 0
+    calc(var(--toggle-shadow-offset) * 4) rgba(0, 0, 0, 0.18);
+  transition: 0.3s all ease-in-out;
+}
+
+.switch input[type="checkbox"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch input[type="checkbox"]:focus-visible + .slider {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 3px;
+}
+
+.switch input[type="checkbox"]:checked + .slider {
+  background-color: var(--color-green);
+  border-color: var(--color-green);
+}
+
+.switch input[type="checkbox"]:checked + .slider::after {
+  transform: translateX(
+    calc(
+      var(--button-width) - var(--toggle-diameter) - var(--button-toggle-offset) - 1px
+    )
+  );
+  box-shadow: calc(var(--toggle-shadow-offset) * -1) 0
+    calc(var(--toggle-shadow-offset) * 4) rgba(0, 0, 0, 0.18);
+}
+
+.switch input[type="checkbox"]:active + .slider::after {
+  width: var(--toggle-wider);
+}
+
+.switch input[type="checkbox"]:checked:active + .slider::after {
+  transform: translateX(
+    calc(
+      var(--button-width) - var(--toggle-wider) - var(--button-toggle-offset) - 1px
+    )
+  );
+}
+
 @media (max-width: 600px) {
   header { padding: 1rem 1.25rem; }
   .site-brand { gap: .6rem; }
   .site-logo { width: 26px; height: 26px; }
-  .site-copy { gap: .6rem; }
+  .site-copy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .25rem;
+  }
   .site-title { font-size: 1rem; }
   .site-sub { font-size: .72rem; }
+  .settings-menu-button { width: 36px; height: 36px; }
 }
 
 /* ---- Main --------------------------------------------------------- */
@@ -481,6 +691,14 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 
 .url-link { color: var(--blue); font-size: .72rem; }
 .url-link:hover { text-decoration: underline; }
+.catalog-url-cell .url-link {
+  display: inline-block;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
 .nil { color: var(--text-dim); }
 
 /* ---- Modal -------------------------------------------------------- */

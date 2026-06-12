@@ -12,6 +12,8 @@ const FINANCIAL_AID_STATEMENT = "This university offers some form of financial a
 
 // State
 let allPrograms = [];
+let activeResultsMode = "audit";
+let catalogModeEnabled = false;
 let sortCol = null;
 let sortDir = 1;
 
@@ -80,6 +82,10 @@ const filterDept       = document.getElementById("filterDept");
 const debugOptionsEl   = document.getElementById("debugOptions");
 const debugModeInput   = document.getElementById("debugMode");
 const contentModeSelect= document.getElementById("contentMode");
+const settingsMenuToggle = document.getElementById("settingsMenuToggle");
+const settingsMenuButton = document.querySelector(".settings-menu-button");
+const settingsPanel = document.getElementById("settingsPanel");
+const catalogToggleInput = document.getElementById("catalogToggle");
 const debugPanel       = document.getElementById("debugPanel");
 const debugStatsEl     = document.getElementById("debugStats");
 const debugWarningsEl  = document.getElementById("debugWarnings");
@@ -98,6 +104,62 @@ const accessCodeSubmit = document.getElementById("accessCodeSubmit");
 const accessCodeCancel = document.getElementById("accessCodeCancel");
 const accessCodeClose = document.getElementById("accessCodeClose");
 const accessCodeError = document.getElementById("accessCodeError");
+const countLabel = document.querySelector(".count-label");
+const filterBar = document.querySelector(".filter-bar");
+const tableHeaderRow = document.querySelector("#programTable thead tr");
+
+const AUDIT_TABLE_HEADER_HTML = `
+  <th class="col-num">#</th>
+  <th data-col="name">Program Name <span class="sort-icon">&#8597;</span></th>
+  <th data-col="level">Level <span class="sort-icon">&#8597;</span></th>
+  <th data-col="department">Department <span class="sort-icon">&#8597;</span></th>
+  <th data-col="broad_subject">Subject Area <span class="sort-icon">&#8597;</span></th>
+  <th data-col="mode">Mode <span class="sort-icon">&#8597;</span></th>
+  <th data-col="location">Location <span class="sort-icon">&#8597;</span></th>
+  <th data-col="intake_dates">Intakes <span class="sort-icon">&#8597;</span></th>
+  <th data-col="fee_international">Intl. Fee <span class="sort-icon">&#8597;</span></th>
+  <th data-col="entry_ielts">IELTS <span class="sort-icon">&#8597;</span></th>
+  <th data-col="scholarship">Scholarship <span class="sort-icon">&#8597;</span></th>
+  <th>Details</th>
+  <th>Link</th>
+`;
+
+const CATALOG_TABLE_HEADER_HTML = `
+  <th class="col-num">#</th>
+  <th>Course name</th>
+  <th>University name</th>
+  <th>Course URL</th>
+  <th>Level of study</th>
+  <th>Credits</th>
+  <th>Credits unit</th>
+  <th>Duration</th>
+  <th>Fees</th>
+`;
+
+const AUDIT_CSV_COLUMNS = [
+  "name", "level", "faculty", "department", "broad_subject", "narrow_subject",
+  "location", "mode", "duration", "language_of_instruction",
+  "intake_dates", "application_deadline",
+  "fee_international", "fee_domestic", "fee_eu", "fee_state", "fee_out_of_state", "fee_per", "currency",
+  "financial_aid", "scholarship", "scholarship_details",
+  "entry_requirements_general", "entry_requirements_international",
+  "entry_alevel", "entry_ib", "entry_gpa", "entry_sat", "entry_act",
+  "entry_ielts", "entry_toefl", "entry_pte", "entry_duolingo", "entry_cambridge", "entry_other_english",
+  "entry_gre", "entry_gmat", "entry_work_experience",
+  "rec_letter", "personal_statement", "portfolio", "interview",
+  "accreditation", "description", "url"
+];
+
+const CATALOG_CSV_COLUMNS = [
+  "courseName",
+  "universityName",
+  "courseUrl",
+  "levelOfStudy",
+  "credits",
+  "creditsUnit",
+  "duration",
+  "fees"
+];
 
 const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
 const ACCESS_CODE_CHECKING_LABEL = "Checking...";
@@ -146,15 +208,23 @@ function clearStoredAccessCode() {
   localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
 }
 
-let debugUiVisible = false;
+let debugUiVisible = true;
 let debugKeySeqIndex = 0;
 let debugKeySeqAt = 0;
+
+initSettingsMenu();
 
 if (debugModeInput) {
   debugModeInput.checked = localStorage.getItem("uniscrape_debug") === "1";
   debugModeInput.addEventListener("change", () => {
     localStorage.setItem("uniscrape_debug", debugModeInput.checked ? "1" : "0");
     if (!debugModeInput.checked) hideDebugPanel();
+  });
+}
+if (catalogToggleInput) {
+  catalogToggleInput.checked = false;
+  catalogToggleInput.addEventListener("change", () => {
+    catalogModeEnabled = catalogToggleInput.checked;
   });
 }
 if (contentModeSelect) {
@@ -214,21 +284,27 @@ function isInvalidAccessCodeError(error) {
   return error?.code === "INVALID_ACCESS_CODE";
 }
 
-async function sendBackendExtractRequest(url, debugOnly, accessCode) {
+async function sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode = false) {
   const trimmedAccessCode = String(accessCode || "").trim();
 
   if (!trimmedAccessCode) {
     throw new Error("Please enter an access code.");
   }
 
+  const payload = {
+    url,
+    password: trimmedAccessCode,
+    debug: debugOnly,
+  };
+
+  if (catalogMode) {
+    payload.extractionMode = "catalog";
+  }
+
   const res = await fetch(EXTRACT_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      url,
-      password: trimmedAccessCode,
-      debug: debugOnly,
-    }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
 
@@ -259,8 +335,8 @@ async function readBackendExtractResponse(res) {
   return data;
 }
 
-async function useBackendExtract(url, debugOnly, accessCode) {
-  const res = await sendBackendExtractRequest(url, debugOnly, accessCode);
+async function useBackendExtract(url, debugOnly, accessCode, catalogMode = false) {
+  const res = await sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode);
   return readBackendExtractResponse(res);
 }
 
@@ -309,6 +385,7 @@ function handleExtractClick() {
 function prepareExtractionRequest() {
   const url = urlInput.value.trim();
   const debugOnly = isDebugMode();
+  const catalogMode = isCatalogMode();
 
   resetDebugState();
   clearError();
@@ -324,7 +401,7 @@ function prepareExtractionRequest() {
     return null;
   }
 
-  return { url, debugOnly };
+  return { url, debugOnly, catalogMode };
 }
 
 function ensureAccessCodeThenRun(request) {
@@ -338,7 +415,7 @@ function ensureAccessCodeThenRun(request) {
 }
 
 async function runExtractionWithAccessCode(request, accessCode, acceptedResponse = null) {
-  const { url, debugOnly } = request;
+  const { url, debugOnly, catalogMode } = request;
 
   resetDebugState();
   clearError();
@@ -361,7 +438,7 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   try {
     const result = acceptedResponse
       ? await readBackendExtractResponse(acceptedResponse)
-      : await useBackendExtract(url, debugOnly, accessCode);
+      : await useBackendExtract(url, debugOnly, accessCode, catalogMode);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -372,13 +449,22 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
       return;
     }
 
-    programs = Array.isArray(result.programs) ? result.programs : [];
+    if (isCatalogResponse(result)) {
+      activeResultsMode = "catalog";
+      programs = normalizeCatalogRows(result.catalogRows);
+    } else {
+      activeResultsMode = "audit";
+      programs = Array.isArray(result.programs) ? result.programs : [];
+    }
 
     if (!programs.length) {
       stopStatusSequence();
       scrapeBtn.disabled = false;
       if (isDebugMode()) renderDebugPanel();
-      return showError("No programs were extracted. Enable debug mode and re-run to inspect what the backend received.");
+      const emptyMessage = activeResultsMode === "catalog"
+        ? "No catalog rows were extracted. Enable debug mode and re-run to inspect what the backend received."
+        : "No programs were extracted. Enable debug mode and re-run to inspect what the backend received.";
+      return showError(emptyMessage);
     }
   } catch (e) {
     stopStatusSequence();
@@ -394,11 +480,13 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   stopStatusSequence();
   showStatus("Mapping subjects...", 82);
 
-  programs = programs.map(p => {
-    p = mapSubjects(p);
-    p = applyFinancialAidStatement(p);
-    return p;
-  });
+  if (activeResultsMode !== "catalog") {
+    programs = programs.map(p => {
+      p = mapSubjects(p);
+      p = applyFinancialAidStatement(p);
+      return p;
+    });
+  }
 
   showStatus("Rendering results...", 96);
   allPrograms = programs;
@@ -510,7 +598,7 @@ async function submitAccessCodeModal() {
   setAccessCodeModalLoading(true);
 
   try {
-    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode);
+    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode, request.catalogMode);
     saveAccessCode(accessCode);
     closeAccessCodeModal({ force: true });
     await nextFrame();
@@ -599,41 +687,64 @@ function resetDebugState() {
   };
 }
 
+function initSettingsMenu() {
+  if (!settingsMenuToggle || !settingsPanel || !settingsMenuButton) return;
+
+  setSettingsMenuOpen(false);
+
+  settingsMenuToggle.addEventListener("change", () => {
+    setSettingsMenuOpen(settingsMenuToggle.checked);
+  });
+
+  settingsMenuButton.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    setSettingsMenuOpen(!isSettingsMenuOpen());
+  });
+
+  document.addEventListener("click", e => {
+    if (!isSettingsMenuOpen()) return;
+    if (e.target.closest(".settings-menu")) return;
+    setSettingsMenuOpen(false);
+  });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && isSettingsMenuOpen()) {
+      setSettingsMenuOpen(false);
+    }
+  });
+}
+
+function isSettingsMenuOpen() {
+  return Boolean(settingsPanel && !settingsPanel.hidden);
+}
+
+function setSettingsMenuOpen(isOpen) {
+  if (!settingsMenuToggle || !settingsPanel || !settingsMenuButton) return;
+
+  settingsMenuToggle.checked = Boolean(isOpen);
+  settingsPanel.hidden = !isOpen;
+  settingsMenuButton.setAttribute("aria-expanded", String(Boolean(isOpen)));
+  settingsMenuButton.setAttribute("aria-label", isOpen ? "Close settings menu" : "Open settings menu");
+}
+
 function isDebugMenuVisible() {
-  return debugUiVisible;
+  return isSettingsMenuOpen();
 }
 
 function loadDebugUiVisibility() {
-  const stored = localStorage.getItem("uniscrape_debug_visible");
-  const isDevHost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-
-  debugUiVisible = isDevHost && stored === "1";
-  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
-  applyDebugUiVisibility();
+  debugUiVisible = true;
+  debugOptionsEl?.classList.add("debug-options--visible");
 }
 
 function applyDebugUiVisibility() {
-  if (!debugOptionsEl) return;
-
-  debugOptionsEl.classList.toggle("debug-options--visible", debugUiVisible);
-
-  if (!debugUiVisible) {
-    hideDebugPanel();
-    if (debugModeInput) {
-      debugModeInput.checked = false;
-      localStorage.setItem("uniscrape_debug", "0");
-    }
-  }
+  debugUiVisible = true;
+  debugOptionsEl?.classList.add("debug-options--visible");
 }
 
 function toggleDebugUiVisibility(forceVisible = null) {
-  debugUiVisible = forceVisible === null ? !debugUiVisible : Boolean(forceVisible);
-  localStorage.setItem("uniscrape_debug_visible", debugUiVisible ? "1" : "0");
-  applyDebugUiVisibility();
-
-  if (debugUiVisible && isDebugMode() && (debugState.finalExtractionMarkdown || debugState.markdown)) {
-    renderDebugPanel();
-  }
+  const shouldOpen = forceVisible === null ? !isSettingsMenuOpen() : Boolean(forceVisible);
+  setSettingsMenuOpen(shouldOpen);
 }
 
 function initDebugKeyboardShortcut() {
@@ -682,7 +793,12 @@ window.uniScrapeHideDebug = () => toggleDebugUiVisibility(false);
 window.uniScrapeToggleDebug = () => toggleDebugUiVisibility();
 
 function isDebugMode() {
-  return debugUiVisible && Boolean(debugModeInput?.checked);
+  return Boolean(debugModeInput?.checked);
+}
+
+function isCatalogMode() {
+  catalogModeEnabled = Boolean(catalogToggleInput?.checked);
+  return catalogModeEnabled;
 }
 
 function downloadTextFile(filename, content) {
@@ -1428,20 +1544,55 @@ function mapSubjects(program) {
 }
 
 //Render results
+function isCatalogResponse(result) {
+  return result?.extractionMode === "catalog" || Array.isArray(result?.catalogRows);
+}
+
+function normalizeCatalogRows(rows) {
+  if (!Array.isArray(rows)) return [];
+
+  return rows.map(row => ({
+    courseName: row?.courseName || "",
+    universityName: row?.universityName || "",
+    courseUrl: row?.courseUrl || "",
+    levelOfStudy: row?.levelOfStudy || "",
+    credits: row?.credits || "",
+    creditsUnit: row?.creditsUnit || "",
+    duration: row?.duration || "",
+    fees: row?.fees || "",
+  }));
+}
+
+function isCatalogResults() {
+  return activeResultsMode === "catalog";
+}
+
 function renderResults(sourceUrl) {
   let host;
   try { host = new URL(sourceUrl).hostname; } catch { host = sourceUrl; }
   sourcePill.textContent = host;
+  if (countLabel) countLabel.textContent = isCatalogResults() ? "catalog rows found from" : "programs found from";
+  filterBar?.classList.toggle("hidden", isCatalogResults());
+  noResults.textContent = isCatalogResults() ? "No catalog rows to display." : "No programs match your filters.";
+  setResultsTableMode(activeResultsMode);
   resultsSection.classList.remove("hidden");
   applyFiltersAndRender();
 
-  [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => {
-    el.removeEventListener("input", applyFiltersAndRender);
-    el.addEventListener("input", applyFiltersAndRender);
-  });
+  if (!isCatalogResults()) {
+    [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => {
+      el.removeEventListener("input", applyFiltersAndRender);
+      el.addEventListener("input", applyFiltersAndRender);
+    });
+  }
 }
 
 function applyFiltersAndRender() {
+  if (isCatalogResults()) {
+    resultCount.textContent = allPrograms.length;
+    renderCatalogTable(allPrograms);
+    return;
+  }
+
   const name  = filterName.value.toLowerCase();
   const level = filterLevel.value;
   const broad = filterBroad.value;
@@ -1469,6 +1620,18 @@ function applyFiltersAndRender() {
 
   resultCount.textContent = filtered.length;
   renderTable(filtered);
+}
+
+function setResultsTableMode(mode) {
+  if (!tableHeaderRow) return;
+  const nextMode = mode === "catalog" ? "catalog" : "audit";
+  if (tableHeaderRow.dataset.mode === nextMode) return;
+
+  tableHeaderRow.innerHTML = nextMode === "catalog"
+    ? CATALOG_TABLE_HEADER_HTML
+    : AUDIT_TABLE_HEADER_HTML;
+  tableHeaderRow.dataset.mode = nextMode;
+  bindSortableHeaders();
 }
 
 function renderTable(programs) {
@@ -1505,6 +1668,39 @@ function renderTable(programs) {
       openModal(tableBody._filtered[parseInt(btn.dataset.idx)]);
     });
   });
+}
+
+function renderCatalogTable(rows) {
+  if (rows.length === 0) {
+    tableBody.innerHTML = "";
+    noResults.classList.remove("hidden");
+    return;
+  }
+  noResults.classList.add("hidden");
+
+  tableBody.innerHTML = rows.map((row, i) => `
+    <tr>
+      <td class="col-num">${i + 1}</td>
+      <td class="name-cell">${catalogCell(row.courseName)}</td>
+      <td>${catalogCell(row.universityName)}</td>
+      <td class="catalog-url-cell">${catalogUrlCell(row.courseUrl)}</td>
+      <td>${catalogCell(row.levelOfStudy)}</td>
+      <td>${catalogCell(row.credits)}</td>
+      <td>${catalogCell(row.creditsUnit)}</td>
+      <td>${catalogCell(row.duration)}</td>
+      <td>${catalogCell(row.fees)}</td>
+    </tr>
+  `).join("");
+}
+
+function catalogCell(value) {
+  return value ? esc(value) : '<span class="nil">-</span>';
+}
+
+function catalogUrlCell(value) {
+  if (!value) return '<span class="nil">-</span>';
+  const safeUrl = esc(value);
+  return `<a class="url-link" href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>`;
 }
 
 function feeCell(p) {
@@ -1617,33 +1813,25 @@ modal.addEventListener("click", e => { if (e.target === modal) modal.classList.a
 document.addEventListener("keydown", e => { if (e.key === "Escape") modal.classList.add("hidden"); });
 
 //Sorting
-document.querySelectorAll("th[data-col]").forEach(th => {
-  th.addEventListener("click", () => {
-    const col = th.dataset.col;
-    sortDir = sortCol === col ? sortDir * -1 : 1;
-    sortCol = col;
-    document.querySelectorAll("th").forEach(t => t.classList.remove("sorted-asc", "sorted-desc"));
-    th.classList.add(sortDir === 1 ? "sorted-asc" : "sorted-desc");
-    applyFiltersAndRender();
+function bindSortableHeaders() {
+  document.querySelectorAll("th[data-col]").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      sortDir = sortCol === col ? sortDir * -1 : 1;
+      sortCol = col;
+      document.querySelectorAll("th").forEach(t => t.classList.remove("sorted-asc", "sorted-desc"));
+      th.classList.add(sortDir === 1 ? "sorted-asc" : "sorted-desc");
+      applyFiltersAndRender();
+    });
   });
-});
+}
+
+bindSortableHeaders();
 
 //Export CSV
 exportBtn.addEventListener("click", () => {
   if (!allPrograms.length) return;
-  const cols = [
-    "name", "level", "faculty", "department", "broad_subject", "narrow_subject",
-    "location", "mode", "duration", "language_of_instruction",
-    "intake_dates", "application_deadline",
-    "fee_international", "fee_domestic", "fee_eu", "fee_state", "fee_out_of_state", "fee_per", "currency",
-    "financial_aid", "scholarship", "scholarship_details",
-    "entry_requirements_general", "entry_requirements_international",
-    "entry_alevel", "entry_ib", "entry_gpa", "entry_sat", "entry_act",
-    "entry_ielts", "entry_toefl", "entry_pte", "entry_duolingo", "entry_cambridge", "entry_other_english",
-    "entry_gre", "entry_gmat", "entry_work_experience",
-    "rec_letter", "personal_statement", "portfolio", "interview",
-    "accreditation", "description", "url"
-  ];
+  const cols = isCatalogResults() ? CATALOG_CSV_COLUMNS : AUDIT_CSV_COLUMNS;
   const rows = [
     cols.join(","),
     ...allPrograms.map(p =>
@@ -1658,14 +1846,22 @@ exportBtn.addEventListener("click", () => {
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const a    = document.createElement("a");
   a.href     = URL.createObjectURL(blob);
-  a.download = `uniscrape-v3.1_${new Date().toISOString().slice(0, 10)}.csv`;
+  const exportType = isCatalogResults() ? "catalog" : "audit";
+  a.download = `uniscrape-${exportType}_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 });
 
 //Clear
 clearBtn.addEventListener("click", () => {
   allPrograms = [];
+  activeResultsMode = "audit";
+  sortCol = null;
+  sortDir = 1;
   urlInput.value = "";
+  setResultsTableMode("audit");
+  filterBar?.classList.remove("hidden");
+  if (countLabel) countLabel.textContent = "programs found from";
+  noResults.textContent = "No programs match your filters.";
   hideResults();
   clearError();
   hideDebugPanel();
