@@ -4,10 +4,15 @@
 
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
+const VERIFY_ACCESS_API_URL = new URL("/verify-access", EXTRACT_API_URL).toString();
 const EXTRACT_TIMEOUT_MS = 300000;
+const VERIFY_ACCESS_TIMEOUT_MS = 15000;
 const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
 const LEGACY_UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
-const INVALID_ACCESS_CODE_MESSAGE = "Access code incorrect. Please enter the latest access code and try again.";
+const UNISCRAPE_ACCESS_VERIFIED_SESSION_KEY = "uniscrapeAccessVerified";
+const UNISCRAPE_ACCESS_CODE_SESSION_KEY = "uniscrapeAccessCode";
+const INVALID_ACCESS_CODE_MESSAGE = "Invalid access code.";
+const ACCESS_CODE_VERIFY_ERROR_MESSAGE = "Could not verify access code. Please try again.";
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 const DEFAULT_CONTENT_MODE = "auto";
 
@@ -172,7 +177,7 @@ const CATALOG_CSV_COLUMNS = [
 ];
 
 const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
-const ACCESS_CODE_CHECKING_LABEL = "Checking...";
+const ACCESS_CODE_CHECKING_LABEL = "Verifying...";
 let pendingAccessCodeRequest = null;
 let accessCodeChecking = false;
 
@@ -196,26 +201,76 @@ function isAccessCodeModalOpen() {
 }
 
 //Persist settings
-function getStoredAccessCode() {
-  const accessCode = (localStorage.getItem(UNISCRAPE_ACCESS_CODE_KEY) || "").trim();
-  const legacyAccessCode = (localStorage.getItem(LEGACY_UNISCRAPE_ACCESS_KEY_KEY) || "").trim();
-
-  if (accessCode) return accessCode;
-  if (legacyAccessCode) {
-    saveAccessCode(legacyAccessCode);
-    localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
+function readSessionValue(key) {
+  try {
+    return (sessionStorage.getItem(key) || "").trim();
+  } catch {
+    return "";
   }
-  return legacyAccessCode;
+}
+
+function writeSessionValue(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Session storage can be unavailable in hardened browser modes.
+  }
+}
+
+function removeSessionValue(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
+
+function readLocalValue(key) {
+  try {
+    return (localStorage.getItem(key) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function removeLocalValue(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
+
+function getVerifiedAccessCode() {
+  const accessCode = readSessionValue(UNISCRAPE_ACCESS_CODE_SESSION_KEY);
+  const verified = readSessionValue(UNISCRAPE_ACCESS_VERIFIED_SESSION_KEY) === "true";
+  return verified && accessCode ? accessCode : "";
+}
+
+function getAccessCodePrefill() {
+  return getVerifiedAccessCode()
+    || readLocalValue(UNISCRAPE_ACCESS_CODE_KEY)
+    || readLocalValue(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
 }
 
 function saveAccessCode(accessCode) {
-  localStorage.setItem(UNISCRAPE_ACCESS_CODE_KEY, String(accessCode || "").trim());
-  localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
+  const trimmedAccessCode = String(accessCode || "").trim();
+  if (!trimmedAccessCode) {
+    clearStoredAccessCode();
+    return;
+  }
+
+  writeSessionValue(UNISCRAPE_ACCESS_VERIFIED_SESSION_KEY, "true");
+  writeSessionValue(UNISCRAPE_ACCESS_CODE_SESSION_KEY, trimmedAccessCode);
+  removeLocalValue(UNISCRAPE_ACCESS_CODE_KEY);
+  removeLocalValue(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
 }
 
 function clearStoredAccessCode() {
-  localStorage.removeItem(UNISCRAPE_ACCESS_CODE_KEY);
-  localStorage.removeItem(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
+  removeSessionValue(UNISCRAPE_ACCESS_VERIFIED_SESSION_KEY);
+  removeSessionValue(UNISCRAPE_ACCESS_CODE_SESSION_KEY);
+  removeLocalValue(UNISCRAPE_ACCESS_CODE_KEY);
+  removeLocalValue(LEGACY_UNISCRAPE_ACCESS_KEY_KEY);
 }
 
 let debugUiVisible = true;
@@ -304,6 +359,44 @@ function createInvalidAccessCodeError() {
 
 function isInvalidAccessCodeError(error) {
   return error?.code === "INVALID_ACCESS_CODE";
+}
+
+async function verifyAccessCode(accessCode) {
+  const trimmedAccessCode = String(accessCode || "").trim();
+
+  if (!trimmedAccessCode) {
+    throw new Error("Please enter an access code.");
+  }
+
+  const res = await fetch(VERIFY_ACCESS_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessCode: trimmedAccessCode }),
+    signal: AbortSignal.timeout(VERIFY_ACCESS_TIMEOUT_MS),
+  });
+  const data = await res.json().catch(() => null);
+
+  if (res.status === 401 || res.status === 403 || data?.valid === false) {
+    throw createInvalidAccessCodeError();
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || "Access verification failed with HTTP " + res.status);
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error("Access verification returned an empty response.");
+  }
+
+  if (data.ok === false || data.valid === false) {
+    throw createInvalidAccessCodeError();
+  }
+
+  if (data.valid !== true) {
+    throw new Error("Access verification returned an unexpected response.");
+  }
+
+  return data;
 }
 
 async function sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode = false) {
@@ -427,16 +520,16 @@ function prepareExtractionRequest() {
 }
 
 function ensureAccessCodeThenRun(request) {
-  const storedAccessCode = getStoredAccessCode();
-  if (storedAccessCode) {
-    runExtractionWithAccessCode(request, storedAccessCode);
+  const verifiedAccessCode = getVerifiedAccessCode();
+  if (verifiedAccessCode) {
+    runExtractionWithAccessCode(request, verifiedAccessCode);
     return;
   }
 
   openAccessCodeModal(request);
 }
 
-async function runExtractionWithAccessCode(request, accessCode, acceptedResponse = null) {
+async function runExtractionWithAccessCode(request, accessCode) {
   const { url, debugOnly, catalogMode } = request;
 
   resetDebugState();
@@ -458,9 +551,7 @@ async function runExtractionWithAccessCode(request, accessCode, acceptedResponse
   let programs = [];
 
   try {
-    const result = acceptedResponse
-      ? await readBackendExtractResponse(acceptedResponse)
-      : await useBackendExtract(url, debugOnly, accessCode, catalogMode);
+    const result = await useBackendExtract(url, debugOnly, accessCode, catalogMode);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -525,7 +616,7 @@ function openAccessCodeModal(request, options = {}) {
 
   const { errorMessage = "", preserveValue = false } = options;
   pendingAccessCodeRequest = request;
-  if (!preserveValue) accessCodeInput.value = "";
+  if (!preserveValue) accessCodeInput.value = getAccessCodePrefill();
   accessCodeInput.type = "password";
   accessCodeInput.removeAttribute("aria-invalid");
   if (accessCodeToggle) accessCodeToggle.textContent = "Show";
@@ -621,11 +712,11 @@ async function submitAccessCodeModal() {
   setAccessCodeModalLoading(true);
 
   try {
-    const acceptedResponse = await sendBackendExtractRequest(request.url, request.debugOnly, accessCode, request.catalogMode);
+    await verifyAccessCode(accessCode);
     saveAccessCode(accessCode);
     closeAccessCodeModal({ force: true });
     await nextFrame();
-    runExtractionWithAccessCode(request, accessCode, acceptedResponse);
+    runExtractionWithAccessCode(request, accessCode);
   } catch (e) {
     if (isInvalidAccessCodeError(e)) {
       handleInvalidAccessCode(request, { keepModalOpen: true });
@@ -633,10 +724,11 @@ async function submitAccessCodeModal() {
     }
 
     setAccessCodeModalLoading(false);
-    closeAccessCodeModal({ force: true });
-    scrapeBtn.disabled = false;
-    if (shouldShowContentDiagnostics()) renderDebugPanel();
-    showError("Extraction failed: " + e.message);
+    setAccessCodeModalError(ACCESS_CODE_VERIFY_ERROR_MESSAGE);
+    setTimeout(() => {
+      accessCodeInput?.focus();
+      accessCodeInput?.select();
+    }, 0);
   }
 }
 

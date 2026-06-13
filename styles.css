@@ -853,6 +853,12 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   justify-content: center;
   padding: 1.5rem;
 }
+#accessCodeModal {
+  background: rgba(0, 0, 0, .16);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
 .modal-box {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -968,37 +974,51 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 
 .access-code-box {
   max-width: 420px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
+}
+
+.access-code-box .modal-header {
+  padding: 1.35rem 1.75rem 1.05rem;
 }
 
 .access-code-body {
-  gap: .9rem;
+  padding: 1.35rem 1.75rem 1.5rem;
+  gap: 1rem;
 }
 
 .access-code-help {
-  font-size: .78rem;
+  font-size: .8rem;
+  line-height: 1.55;
   color: var(--text-muted);
+}
+
+.access-code-body .field-group {
+  gap: .55rem;
 }
 
 .access-code-input-row {
   display: flex;
-  gap: .5rem;
+  gap: .65rem;
 }
 
 .access-code-input-row .text-input {
   min-width: 0;
+  padding: .7rem .9rem;
 }
 
 .access-code-error {
   color: var(--red);
   font-size: .72rem;
-  margin-top: .15rem;
+  line-height: 1.45;
+  margin-top: .1rem;
 }
 
 .access-code-actions {
   display: flex;
   justify-content: flex-end;
-  gap: .5rem;
+  gap: .65rem;
   flex-wrap: wrap;
+  padding-top: .15rem;
 }
 
 /* ---- No results --------------------------------------------------- */
