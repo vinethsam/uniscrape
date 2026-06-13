@@ -502,17 +502,26 @@ function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
   if (!button) return;
 
   const loading = Boolean(isLoading);
+  const label = button.querySelector(".white-sweep-btn-label");
   if (!button.dataset.defaultLabel) {
-    button.dataset.defaultLabel = defaultLabel || button.textContent.trim();
+    button.dataset.defaultLabel = defaultLabel || (label ? label.textContent.trim() : button.textContent.trim());
   }
 
   button.classList.toggle("is-loading", loading);
   if (loading) {
     button.setAttribute("aria-busy", "true");
-    button.textContent = loadingText;
+    if (label) {
+      label.textContent = loadingText;
+    } else {
+      button.textContent = loadingText;
+    }
   } else {
     button.removeAttribute("aria-busy");
-    button.textContent = button.dataset.defaultLabel;
+    if (label) {
+      label.textContent = button.dataset.defaultLabel;
+    } else {
+      button.textContent = button.dataset.defaultLabel;
+    }
   }
 }
 

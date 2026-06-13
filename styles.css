@@ -624,12 +624,7 @@ input[type="checkbox"]:checked::after {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: .5rem;
   min-width: 160px;
-  min-height: 44px;
   background: transparent;
   color: #fff;
   border: 2px solid #fff;
@@ -638,12 +633,17 @@ input[type="checkbox"]:checked::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   background: #fff;
   transform: translateX(-100%);
+  pointer-events: none;
   transition:
     transform .3s ease,
     background-color 180ms ease;
+}
+.white-sweep-btn > * {
+  position: relative;
+  z-index: 1;
 }
 .white-sweep-btn:not(:disabled):hover,
 .white-sweep-btn:not(:disabled):focus-visible {
@@ -1134,52 +1134,66 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 }
 
 .access-code-box {
-  max-width: 420px;
+  width: min(420px, calc(100vw - 32px));
+  max-width: none;
   box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
 }
 
-.access-code-box .modal-header {
-  padding: 1.35rem 1.75rem 1.05rem;
-}
-
 .access-code-body {
-  padding: 1.35rem 1.75rem 1.5rem;
-  gap: 1rem;
+  padding: 1rem;
+  gap: .8rem;
+  overflow: visible;
 }
 
-.access-code-help {
-  font-size: .8rem;
-  line-height: 1.55;
-  color: var(--text-muted);
+.access-code-row {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
 }
 
-.access-code-body .field-group {
-  gap: .55rem;
+.access-code-label {
+  flex: 0 0 auto;
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .access-code-input-row {
   display: flex;
+  align-items: center;
+  flex: 1;
   gap: .65rem;
+  min-width: 0;
 }
 
 .access-code-input-row .text-input {
+  flex: 1;
   min-width: 0;
-  padding: .7rem .9rem;
 }
 
 .access-code-error {
   color: var(--red);
   font-size: .72rem;
   line-height: 1.45;
-  margin-top: .1rem;
 }
 
 .access-code-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: .65rem;
-  flex-wrap: wrap;
-  padding-top: .15rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: .2rem;
+}
+
+.access-code-actions .ghost-btn {
+  margin-right: auto;
+}
+
+.unlock-continue-btn {
+  margin-left: auto;
 }
 
 /* ---- No results --------------------------------------------------- */

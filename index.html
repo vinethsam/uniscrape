@@ -127,7 +127,9 @@
             autocomplete="off"
             spellcheck="false"
           />
-          <button id="scrapeBtn" class="primary-btn white-sweep-btn extract-programs-btn" type="button">Extract Programs</button>
+          <button id="scrapeBtn" class="primary-btn white-sweep-btn extract-programs-btn" type="button">
+            <span class="white-sweep-btn-label">Extract Programs</span>
+          </button>
         </div>
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
@@ -264,30 +266,29 @@
     </div>
 
     <!-- Access Code Modal -->
-    <div id="accessCodeModal" class="modal hidden" hidden role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="accessCodeTitle" aria-describedby="accessCodeHelp">
+    <div id="accessCodeModal" class="modal hidden" hidden role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="accessCodeTitle">
       <div class="modal-box access-code-box">
-        <div class="modal-header">
-          <span id="accessCodeTitle" class="modal-title">Access Code</span>
-        </div>
         <div class="modal-body access-code-body">
-          <p id="accessCodeHelp" class="access-code-help">Enter the current UniScrape access code to continue.</p>
-          <div class="field-group">
-            <label for="accessCodeInput" class="field-label">Access Code</label>
+          <div class="access-code-row">
+            <label id="accessCodeTitle" for="accessCodeInput" class="field-label access-code-label">Access code</label>
             <div class="access-code-input-row">
               <input
                 type="password"
                 id="accessCodeInput"
                 class="text-input"
+                placeholder="Enter latest UniScrape code to continue..."
                 autocomplete="off"
                 spellcheck="false"
               />
               <button id="accessCodeToggle" type="button" class="ghost-btn">Show</button>
             </div>
-            <p id="accessCodeError" class="access-code-error hidden"></p>
           </div>
+          <p id="accessCodeError" class="access-code-error hidden"></p>
           <div class="access-code-actions">
             <button id="accessCodeCancel" type="button" class="ghost-btn">Cancel</button>
-            <button id="accessCodeSubmit" type="button" class="primary-btn white-sweep-btn unlock-continue-btn">Unlock and Continue</button>
+            <button id="accessCodeSubmit" type="button" class="primary-btn white-sweep-btn unlock-continue-btn">
+              <span class="white-sweep-btn-label">Unlock and Continue</span>
+            </button>
           </div>
         </div>
       </div>
