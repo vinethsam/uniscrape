@@ -2048,19 +2048,12 @@ function openModal(p) {
     </div>
   `;
 
-  const row = (key, val, isHtml, copyConfig = null) => {
+  const row = (key, val, isHtml) => {
     const display = val
       ? (isHtml ? val : esc(String(val)))
       : '<span class="nil">N/A</span>';
-    const copyAction = copyConfig
-      ? copyButton(copyConfig.label, copyConfig.value ?? val, { isHtml: Boolean(copyConfig.isHtml) })
-      : "";
-    const rowClass = copyAction ? " modal-row-copyable" : "";
-    const keyHtml = copyAction
-      ? `<span class="modal-key"><span class="modal-key-label">${key}</span><span class="modal-field-actions">${copyAction}</span></span>`
-      : `<span class="modal-key">${key}</span>`;
 
-    return `<div class="modal-row${rowClass}">${keyHtml}<span class="modal-val">${display}</span></div>`;
+    return `<div class="modal-row"><span class="modal-key">${key}</span><span class="modal-val">${display}</span></div>`;
   };
 
   // Description gets its own styled block - rendered as HTML since it may contain formatting
@@ -2071,7 +2064,7 @@ function openModal(p) {
 
   modalBody.innerHTML = `
     ${section("Program")}
-    ${row("Name",           p.name, false, { label: "Copy program name" })}
+    ${row("Name",           p.name)}
     ${row("Level",          p.level)}
     ${row("Faculty",        p.faculty)}
     ${row("Department",     p.department)}
@@ -2082,7 +2075,7 @@ function openModal(p) {
     ${row("Duration",       p.duration)}
     ${row("Language",       p.language_of_instruction)}
     ${row("Accreditation",  p.accreditation)}
-    ${row("Program URL",    p.url ? `<a class="url-link" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>` : "", true, { label: "Copy program link", value: p.url })}
+    ${row("Program URL",    p.url ? `<a class="url-link" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>` : "", true)}
 
     ${descBlock}
 
@@ -2105,8 +2098,8 @@ function openModal(p) {
     ${row("Scholarship Details",   p.scholarship_details)}
 
     ${section("Entry Requirements")}
-    ${row("General Requirements",        p.entry_requirements_general, false, { label: "Copy entry requirements" })}
-    ${row("International Requirements",  p.entry_requirements_international, false, { label: "Copy international requirements" })}
+    ${row("General Requirements",        p.entry_requirements_general)}
+    ${row("International Requirements",  p.entry_requirements_international)}
     ${row("A-Levels",                    p.entry_alevel)}
     ${row("IB Diploma",                  p.entry_ib)}
     ${row("GPA",                         p.entry_gpa)}

@@ -622,31 +622,25 @@ input[type="checkbox"]:checked::after {
 
 .white-sweep-btn {
   min-width: 160px;
-  background-color: #fff;
-  background-image: linear-gradient(
-    to right,
-    rgba(0, 0, 0, .08) 0%,
-    rgba(0, 0, 0, .08) 100%
-  );
+  background-color: transparent;
+  background-image: linear-gradient(to right, #fff 0%, #fff 100%);
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 0% 100%;
-  color: #000;
+  color: #fff;
   border: 1px solid #fff;
   opacity: 1;
   box-shadow: none;
   transition:
-    background-size 550ms ease,
-    background-color 550ms ease,
+    background-size 650ms ease,
     transform 180ms ease,
-    color 200ms ease,
-    border-color 200ms ease;
+    color 250ms ease,
+    border-color 250ms ease;
 }
 .white-sweep-btn:hover,
 .white-sweep-btn:focus-visible,
 .white-sweep-btn:not(:disabled):hover,
 .white-sweep-btn:not(:disabled):focus-visible {
-  background-color: #fff;
   background-size: 100% 100%;
   color: #000;
   border-color: #fff;
@@ -656,12 +650,12 @@ input[type="checkbox"]:checked::after {
 }
 .white-sweep-btn:active,
 .white-sweep-btn:not(:disabled):active {
-  background-color: #fff;
+  background-size: 100% 100%;
   border-color: #fff;
   color: #000;
   opacity: 1;
   box-shadow: none;
-  transform: none;
+  transform: translateY(0);
 }
 .white-sweep-btn.is-loading,
 .white-sweep-btn.is-loading:disabled,
@@ -680,11 +674,6 @@ input[type="checkbox"]:checked::after {
 .white-sweep-btn[disabled],
 .white-sweep-btn:disabled:not(.is-loading),
 .white-sweep-btn[disabled]:not(.is-loading) {
-  background-color: #fff;
-  background-image: none;
-  background-size: 0% 100%;
-  border-color: #fff;
-  color: #000;
   cursor: not-allowed;
   opacity: 1;
   box-shadow: none;
@@ -1059,15 +1048,6 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   text-transform: uppercase;
   color: var(--text-muted);
   padding-top: .05rem;
-}
-.modal-row-copyable .modal-key {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .6rem;
-}
-.modal-key-label {
-  min-width: 0;
 }
 .modal-val {
   font-size: .8rem;
