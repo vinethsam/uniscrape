@@ -628,6 +628,11 @@ input[type="checkbox"]:checked::after {
   background-image: none;
   opacity: 1;
   box-shadow: none;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
 }
 .white-sweep-btn:hover,
 .white-sweep-btn:focus-visible,
@@ -639,7 +644,7 @@ input[type="checkbox"]:checked::after {
   background-image: none;
   opacity: 1;
   box-shadow: none;
-  transform: none;
+  transform: translateY(-1px);
 }
 .white-sweep-btn:active,
 .white-sweep-btn:not(:disabled):active {
@@ -661,6 +666,7 @@ input[type="checkbox"]:checked::after {
   cursor: wait;
   opacity: 1;
   box-shadow: none;
+  transform: none;
 }
 .white-sweep-btn:disabled,
 .white-sweep-btn[disabled],
@@ -673,6 +679,7 @@ input[type="checkbox"]:checked::after {
   cursor: not-allowed;
   opacity: 1;
   box-shadow: none;
+  transform: none;
 }
 
 /* ---- Status ------------------------------------------------------- */
