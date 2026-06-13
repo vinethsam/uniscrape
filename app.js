@@ -277,6 +277,7 @@ function clearStoredAccessCode() {
 let debugUiVisible = true;
 let debugKeySeqIndex = 0;
 let debugKeySeqAt = 0;
+const buttonDefaultLabels = new WeakMap();
 
 initSettingsMenu();
 
@@ -502,9 +503,9 @@ function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
   if (!button) return;
 
   const loading = Boolean(isLoading);
-  const label = button.querySelector(".white-sweep-btn-label");
-  if (!button.dataset.defaultLabel) {
-    button.dataset.defaultLabel = defaultLabel || (label ? label.textContent.trim() : button.textContent.trim());
+  const label = button.querySelector(".btn-label");
+  if (!buttonDefaultLabels.has(button)) {
+    buttonDefaultLabels.set(button, defaultLabel || (label ? label.textContent.trim() : button.textContent.trim()));
   }
 
   button.classList.toggle("is-loading", loading);
@@ -517,10 +518,11 @@ function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
     }
   } else {
     button.removeAttribute("aria-busy");
+    const restoredLabel = buttonDefaultLabels.get(button);
     if (label) {
-      label.textContent = button.dataset.defaultLabel;
+      label.textContent = restoredLabel;
     } else {
-      button.textContent = button.dataset.defaultLabel;
+      button.textContent = restoredLabel;
     }
   }
 }

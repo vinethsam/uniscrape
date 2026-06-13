@@ -646,13 +646,13 @@ input[type="checkbox"]:checked::after {
   position: relative;
   z-index: 1;
 }
-.white-sweep-btn:not(:disabled):hover,
-.white-sweep-btn:not(:disabled):focus-visible {
+.white-sweep-btn:hover,
+.white-sweep-btn:focus-visible {
   color: #000;
   opacity: 1;
 }
-.white-sweep-btn:not(:disabled):hover::before,
-.white-sweep-btn:not(:disabled):focus-visible::before {
+.white-sweep-btn:hover::before,
+.white-sweep-btn:focus-visible::before {
   transform: translateX(0);
 }
 .white-sweep-btn:not(:disabled):active {
