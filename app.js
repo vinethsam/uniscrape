@@ -705,6 +705,13 @@ function clearAccessCodeModalError() {
   setAccessCodeModalError("");
 }
 
+function clearAccessCodeInput() {
+  if (!accessCodeInput) return;
+  accessCodeInput.value = "";
+  clearAccessCodeModalError();
+  accessCodeInput.focus();
+}
+
 function handleInvalidAccessCode(request, options = {}) {
   const { keepModalOpen = false } = options;
 
@@ -780,7 +787,7 @@ accessCodeToggle?.addEventListener("click", () => {
   accessCodeToggle.textContent = isHidden ? "Hide" : "Show";
   accessCodeInput.focus();
 });
-accessCodeCancel?.addEventListener("click", closeAccessCodeModal);
+accessCodeCancel?.addEventListener("click", clearAccessCodeInput);
 accessCodeModal?.addEventListener("click", e => {
   if (e.target === accessCodeModal) closeAccessCodeModal();
 });
