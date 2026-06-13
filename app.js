@@ -23,6 +23,9 @@ let catalogModeEnabled = false;
 let contentDiagnosticsEnabled = false;
 let sortCol = null;
 let sortDir = 1;
+let copyValueIdCounter = 0;
+const copyValueStore = new Map();
+const COPY_FIELD_FEEDBACK_MS = 1000;
 
 let debugState = {
   rawHtml: "",
@@ -1867,27 +1870,156 @@ function levelBadge(level) {
   return `<span class="level-badge ${cls}">${esc(level ?? "-")}</span>`;
 }
 
+async function copyTextToClipboard(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the textarea fallback below.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+
+  return ok;
+}
+
+function copyButton(label, value, options = {}) {
+  const id = registerCopyValue(value, options);
+  if (!id) return "";
+
+  return `
+    <button type="button" class="copy copy-field-button" data-copy-id="${esc(id)}" aria-label="${esc(label)}">
+      <svg class="clipboard" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="8" y="2" width="8" height="4" rx="1"></rect>
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+      </svg>
+      <svg class="checkmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M20 6 9 17l-5-5"></path>
+      </svg>
+    </button>
+  `;
+}
+
+function registerCopyValue(value, options = {}) {
+  const text = normalizeCopyValue(value, options);
+  if (!text) return "";
+
+  const id = `copy-${copyValueIdCounter += 1}`;
+  copyValueStore.set(id, text);
+  return id;
+}
+
+function normalizeCopyValue(value, { isHtml = false } = {}) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const text = isHtml ? htmlToPlainText(raw) : raw;
+  const normalized = text
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return isPlaceholderCopyValue(normalized) ? "" : normalized;
+}
+
+function htmlToPlainText(html) {
+  const temp = document.createElement("div");
+  temp.innerHTML = String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n");
+  return temp.textContent || "";
+}
+
+function isPlaceholderCopyValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "n/a" || normalized === "na" || normalized === "-";
+}
+
+function bindFieldCopyButtons(root) {
+  root.querySelectorAll(".copy-field-button").forEach(button => {
+    button.addEventListener("click", handleFieldCopyClick);
+  });
+}
+
+async function handleFieldCopyClick(event) {
+  const button = event.currentTarget;
+  const value = copyValueStore.get(button.dataset.copyId);
+  if (!value) return;
+
+  try {
+    const copied = await copyTextToClipboard(value);
+    if (!copied) throw new Error("Clipboard copy returned false.");
+    showCopyButtonState(button, "is-copied");
+  } catch (error) {
+    console.warn("Could not copy field value.", error);
+    showCopyButtonState(button, "is-copy-error");
+  }
+}
+
+function showCopyButtonState(button, stateClass) {
+  clearTimeout(button._copyStateTimer);
+  button.classList.remove("is-copied", "is-copy-error");
+  button.classList.add(stateClass);
+  button._copyStateTimer = setTimeout(() => {
+    button.classList.remove(stateClass);
+  }, COPY_FIELD_FEEDBACK_MS);
+}
+
 //Modal
 function openModal(p) {
+  copyValueStore.clear();
   modalTitle.textContent = p.name ?? "Program Details";
 
   const section = (title) => `<div class="modal-section-title">${title}</div>`;
 
-  const row = (key, val, isHtml) => {
+  const row = (key, val, isHtml, copyConfig = null) => {
     const display = val
       ? (isHtml ? val : esc(String(val)))
       : '<span class="nil">N/A</span>';
-    return `<div class="modal-row"><span class="modal-key">${key}</span><span class="modal-val">${display}</span></div>`;
+    const copyAction = copyConfig
+      ? copyButton(copyConfig.label, copyConfig.value ?? val, { isHtml: Boolean(copyConfig.isHtml) })
+      : "";
+    const valueClass = copyAction ? " modal-val-copyable" : "";
+    const valueHtml = copyAction
+      ? `<span class="modal-val-content">${display}</span><span class="modal-field-actions">${copyAction}</span>`
+      : display;
+
+    return `<div class="modal-row"><span class="modal-key">${key}</span><span class="modal-val${valueClass}">${valueHtml}</span></div>`;
   };
 
   // Description gets its own styled block - rendered as HTML since it may contain formatting
+  const descCopyButton = copyButton("Copy program description", p.description, { isHtml: true });
   const descBlock = p.description
-    ? `${section("Program Description")}<div class="modal-description">${p.description}</div>`
+    ? `${section("Program Description")}<div class="modal-description">${p.description}${descCopyButton ? `<div class="modal-field-actions modal-description-actions">${descCopyButton}</div>` : ""}</div>`
     : "";
 
   modalBody.innerHTML = `
     ${section("Program")}
-    ${row("Name",           p.name)}
+    ${row("Name",           p.name, false, { label: "Copy program name" })}
     ${row("Level",          p.level)}
     ${row("Faculty",        p.faculty)}
     ${row("Department",     p.department)}
@@ -1898,7 +2030,7 @@ function openModal(p) {
     ${row("Duration",       p.duration)}
     ${row("Language",       p.language_of_instruction)}
     ${row("Accreditation",  p.accreditation)}
-    ${row("Program URL",    p.url ? `<a class="url-link" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>` : "", true)}
+    ${row("Program URL",    p.url ? `<a class="url-link" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a>` : "", true, { label: "Copy program link", value: p.url })}
 
     ${descBlock}
 
@@ -1921,8 +2053,8 @@ function openModal(p) {
     ${row("Scholarship Details",   p.scholarship_details)}
 
     ${section("Entry Requirements")}
-    ${row("General Requirements",        p.entry_requirements_general)}
-    ${row("International Requirements",  p.entry_requirements_international)}
+    ${row("General Requirements",        p.entry_requirements_general, false, { label: "Copy entry requirements" })}
+    ${row("International Requirements",  p.entry_requirements_international, false, { label: "Copy international requirements" })}
     ${row("A-Levels",                    p.entry_alevel)}
     ${row("IB Diploma",                  p.entry_ib)}
     ${row("GPA",                         p.entry_gpa)}
@@ -1945,6 +2077,7 @@ function openModal(p) {
     ${row("Interview",                 p.interview)}
   `;
 
+  bindFieldCopyButtons(modalBody);
   modal.classList.remove("hidden");
 }
 

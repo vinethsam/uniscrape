@@ -971,6 +971,95 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   color: var(--text);
   word-break: break-word;
 }
+.modal-val-copyable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .45rem;
+}
+.modal-val-content {
+  min-width: 0;
+}
+.modal-field-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+.modal-description-actions {
+  margin-top: .5rem;
+}
+.copy-field-button {
+  --button-diameter: 28px;
+  --button-border-radius: 6px;
+  --button-bg: rgba(255, 255, 255, .035);
+  --button-hover-bg: rgba(255, 255, 255, .075);
+  --button-outline-color: rgba(78, 201, 148, .38);
+
+  position: relative;
+  width: var(--button-diameter);
+  height: var(--button-diameter);
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: var(--button-border-radius);
+  background: var(--button-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color .16s ease,
+    border-color .16s ease,
+    color .16s ease,
+    transform .16s ease;
+}
+.copy-field-button:hover,
+.copy-field-button:focus-visible {
+  background: var(--button-hover-bg);
+  border-color: rgba(78, 201, 148, .34);
+  color: var(--green);
+  transform: translateY(-1px);
+}
+.copy-field-button:active {
+  outline: 1px solid var(--button-outline-color);
+  transform: translateY(0);
+}
+.copy-field-button svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: .9rem;
+  height: .9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity .14s ease,
+    transform .14s ease;
+  pointer-events: none;
+}
+.copy-field-button .clipboard {
+  opacity: 1;
+}
+.copy-field-button .checkmark {
+  color: var(--green);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.78);
+}
+.copy-field-button.is-copied .clipboard {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.78);
+}
+.copy-field-button.is-copied .checkmark {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.copy-field-button.is-copy-error {
+  border-color: rgba(224, 108, 117, .36);
+  color: var(--red);
+}
 
 .access-code-box {
   max-width: 420px;
