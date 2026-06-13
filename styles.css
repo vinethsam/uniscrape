@@ -620,46 +620,6 @@ input[type="checkbox"]:checked::after {
   transform: none;
 }
 
-/* Extract button visual experiment */
-.extract-button-experiment {
-  background: linear-gradient(145deg, #202020, #171717);
-  color: var(--accent);
-}
-
-.extract-button-experiment:not(:disabled) {
-  box-shadow:
-    7px 7px 16px rgba(0, 0, 0, .38),
-    -5px -5px 14px rgba(255, 255, 255, .035),
-    0 0 0 1px rgba(255, 255, 255, .04);
-}
-
-.extract-button-experiment:not(:disabled):hover,
-.extract-button-experiment:focus-visible {
-  opacity: 1;
-  transform: translateY(-1px);
-  box-shadow:
-    8px 8px 18px rgba(0, 0, 0, .42),
-    -6px -6px 16px rgba(255, 255, 255, .04),
-    0 0 0 1px rgba(255, 255, 255, .14),
-    0 0 18px rgba(255, 255, 255, .16);
-}
-
-.extract-button-experiment:not(:disabled):active {
-  transform: translateY(0);
-  box-shadow:
-    inset 4px 4px 10px rgba(0, 0, 0, .38),
-    inset -4px -4px 10px rgba(255, 255, 255, .04),
-    0 0 12px rgba(255, 255, 255, .12);
-}
-
-.extract-button-experiment:disabled,
-.extract-button-experiment[disabled],
-.extract-button-experiment.is-loading,
-.extract-button-experiment.is-extracting {
-  box-shadow: none;
-  transform: none;
-}
-
 /* ---- Status ------------------------------------------------------- */
 .status-panel { gap: .75rem; }
 .status-row {
