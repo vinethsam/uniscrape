@@ -201,6 +201,15 @@ function isAccessCodeModalOpen() {
   return Boolean(accessCodeModal && !accessCodeModal.hidden && !accessCodeModal.classList.contains("hidden"));
 }
 
+function syncAccessCodeVisibilityToggle() {
+  if (!accessCodeInput || !accessCodeToggle) return;
+
+  const isVisible = accessCodeInput.type === "text";
+  accessCodeToggle.classList.toggle("is-visible", isVisible);
+  accessCodeToggle.setAttribute("aria-label", isVisible ? "Hide access code" : "Show access code");
+  accessCodeToggle.setAttribute("aria-pressed", String(isVisible));
+}
+
 //Persist settings
 function readSessionValue(key) {
   try {
@@ -654,7 +663,7 @@ function openAccessCodeModal(request, options = {}) {
   if (!preserveValue) accessCodeInput.value = getAccessCodePrefill();
   accessCodeInput.type = "password";
   accessCodeInput.removeAttribute("aria-invalid");
-  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
+  syncAccessCodeVisibilityToggle();
   setAccessCodeModalLoading(false);
   setAccessCodeModalError(errorMessage);
   showAccessCodeModalElement();
@@ -676,7 +685,7 @@ function closeAccessCodeModal(options = {}) {
     accessCodeInput.type = "password";
     accessCodeInput.removeAttribute("aria-invalid");
   }
-  if (accessCodeToggle) accessCodeToggle.textContent = "Show";
+  syncAccessCodeVisibilityToggle();
   setAccessCodeModalError("");
 }
 
@@ -786,9 +795,10 @@ accessCodeToggle?.addEventListener("click", () => {
   if (!accessCodeInput || !accessCodeToggle) return;
   const isHidden = accessCodeInput.type === "password";
   accessCodeInput.type = isHidden ? "text" : "password";
-  accessCodeToggle.textContent = isHidden ? "Hide" : "Show";
+  syncAccessCodeVisibilityToggle();
   accessCodeInput.focus();
 });
+syncAccessCodeVisibilityToggle();
 accessCodeCancel?.addEventListener("click", clearAccessCodeInput);
 accessCodeModal?.addEventListener("click", e => {
   if (e.target === accessCodeModal) closeAccessCodeModal();
@@ -2031,7 +2041,12 @@ function openModal(p) {
   copyValueStore.clear();
   modalTitle.textContent = p.name ?? "Program Details";
 
-  const section = (title) => `<div class="modal-section-title">${title}</div>`;
+  const section = (title, action = "") => `
+    <div class="modal-section-title${action ? " modal-section-title-with-action" : ""}">
+      <span>${title}</span>
+      ${action ? `<span class="modal-field-actions modal-description-actions">${action}</span>` : ""}
+    </div>
+  `;
 
   const row = (key, val, isHtml, copyConfig = null) => {
     const display = val
@@ -2040,18 +2055,18 @@ function openModal(p) {
     const copyAction = copyConfig
       ? copyButton(copyConfig.label, copyConfig.value ?? val, { isHtml: Boolean(copyConfig.isHtml) })
       : "";
-    const valueClass = copyAction ? " modal-val-copyable" : "";
-    const valueHtml = copyAction
-      ? `<span class="modal-val-content">${display}</span><span class="modal-field-actions">${copyAction}</span>`
-      : display;
+    const rowClass = copyAction ? " modal-row-copyable" : "";
+    const keyHtml = copyAction
+      ? `<span class="modal-key"><span class="modal-key-label">${key}</span><span class="modal-field-actions">${copyAction}</span></span>`
+      : `<span class="modal-key">${key}</span>`;
 
-    return `<div class="modal-row"><span class="modal-key">${key}</span><span class="modal-val${valueClass}">${valueHtml}</span></div>`;
+    return `<div class="modal-row${rowClass}">${keyHtml}<span class="modal-val">${display}</span></div>`;
   };
 
   // Description gets its own styled block - rendered as HTML since it may contain formatting
   const descCopyButton = copyButton("Copy program description", p.description, { isHtml: true });
   const descBlock = p.description
-    ? `${section("Program Description")}<div class="modal-description">${p.description}${descCopyButton ? `<div class="modal-field-actions modal-description-actions">${descCopyButton}</div>` : ""}</div>`
+    ? `${section("Program Description", descCopyButton)}<div class="modal-description">${p.description}</div>`
     : "";
 
   modalBody.innerHTML = `

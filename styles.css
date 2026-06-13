@@ -622,34 +622,41 @@ input[type="checkbox"]:checked::after {
 
 .white-sweep-btn {
   min-width: 160px;
-  background: #fff;
+  background-color: #fff;
+  background-image: linear-gradient(
+    to right,
+    rgba(0, 0, 0, .08) 0%,
+    rgba(0, 0, 0, .08) 100%
+  );
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 0% 100%;
   color: #000;
   border: 1px solid #fff;
-  background-image: none;
   opacity: 1;
   box-shadow: none;
   transition:
+    background-size 550ms ease,
+    background-color 550ms ease,
     transform 180ms ease,
-    background-color 180ms ease,
-    color 180ms ease,
-    border-color 180ms ease;
+    color 200ms ease,
+    border-color 200ms ease;
 }
 .white-sweep-btn:hover,
 .white-sweep-btn:focus-visible,
 .white-sweep-btn:not(:disabled):hover,
 .white-sweep-btn:not(:disabled):focus-visible {
-  background: #fff;
+  background-color: #fff;
+  background-size: 100% 100%;
   color: #000;
   border-color: #fff;
-  background-image: none;
   opacity: 1;
   box-shadow: none;
   transform: translateY(-1px);
 }
 .white-sweep-btn:active,
 .white-sweep-btn:not(:disabled):active {
-  background: #fff;
-  background-image: none;
+  background-color: #fff;
   border-color: #fff;
   color: #000;
   opacity: 1;
@@ -659,8 +666,9 @@ input[type="checkbox"]:checked::after {
 .white-sweep-btn.is-loading,
 .white-sweep-btn.is-loading:disabled,
 .white-sweep-btn.is-loading[disabled] {
-  background: #fff;
+  background-color: #fff;
   background-image: none;
+  background-size: 0% 100%;
   border-color: #fff;
   color: #000;
   cursor: wait;
@@ -672,8 +680,9 @@ input[type="checkbox"]:checked::after {
 .white-sweep-btn[disabled],
 .white-sweep-btn:disabled:not(.is-loading),
 .white-sweep-btn[disabled]:not(.is-loading) {
-  background: #fff;
+  background-color: #fff;
   background-image: none;
+  background-size: 0% 100%;
   border-color: #fff;
   color: #000;
   cursor: not-allowed;
@@ -948,17 +957,34 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 }
 .modal-close {
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 0;
+  border-radius: .45rem;
+  box-shadow: none;
   color: var(--text-muted);
   font-family: var(--font);
   font-size: .75rem;
-  padding: .2rem .5rem;
+  line-height: 1;
+  padding: .3rem .4rem;
   cursor: pointer;
   flex-shrink: 0;
-  transition: color .15s;
+  transition:
+    background-color .16s ease,
+    color .16s ease,
+    transform .16s ease;
 }
-.modal-close:hover { color: var(--text); }
+.modal-close:hover,
+.modal-close:not(:disabled):hover,
+.modal-close:focus-visible {
+  background: rgba(255, 255, 255, .08);
+  box-shadow: none;
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.modal-close:active,
+.modal-close:not(:disabled):active {
+  box-shadow: none;
+  transform: translateY(0);
+}
 .modal-body {
   padding: 1.25rem;
   overflow-y: auto;
@@ -1011,6 +1037,12 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   padding: .6rem 0 .2rem 0;
   margin-top: .25rem;
 }
+.modal-section-title-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
 .modal-row {
   display: grid;
   grid-template-columns: 160px 1fr;
@@ -1028,33 +1060,33 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   color: var(--text-muted);
   padding-top: .05rem;
 }
+.modal-row-copyable .modal-key {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .6rem;
+}
+.modal-key-label {
+  min-width: 0;
+}
 .modal-val {
   font-size: .8rem;
   color: var(--text);
   word-break: break-word;
 }
-.modal-val-copyable {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: .45rem;
-}
-.modal-val-content {
-  min-width: 0;
-}
 .modal-field-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 .modal-description-actions {
-  margin-top: .5rem;
+  margin-left: auto;
 }
 .copy-field-button {
   --button-diameter: 28px;
-  --button-border-radius: 6px;
-  --button-bg: rgba(255, 255, 255, .035);
-  --button-hover-bg: rgba(255, 255, 255, .075);
+  --button-border-radius: .4rem;
+  --button-hover-bg: rgba(255, 255, 255, .08);
   --button-outline-color: rgba(78, 201, 148, .38);
 
   position: relative;
@@ -1062,9 +1094,10 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   height: var(--button-diameter);
   flex: 0 0 auto;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, .08);
+  border: 0;
   border-radius: var(--button-border-radius);
-  background: var(--button-bg);
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   cursor: pointer;
   outline: none;
@@ -1077,12 +1110,17 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 .copy-field-button:hover,
 .copy-field-button:focus-visible {
   background: var(--button-hover-bg);
-  border-color: rgba(78, 201, 148, .34);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--green);
   transform: translateY(-1px);
 }
-.copy-field-button:active {
+.copy-field-button:focus-visible {
   outline: 1px solid var(--button-outline-color);
+  outline-offset: 2px;
+}
+.copy-field-button:active {
+  box-shadow: none;
   transform: translateY(0);
 }
 .copy-field-button svg {
@@ -1119,7 +1157,7 @@ td.name-cell { max-width: 220px; font-weight: 500; }
   transform: translate(-50%, -50%) scale(1);
 }
 .copy-field-button.is-copy-error {
-  border-color: rgba(224, 108, 117, .36);
+  background: rgba(224, 108, 117, .08);
   color: var(--red);
 }
 
@@ -1154,6 +1192,70 @@ td.name-cell { max-width: 220px; font-weight: 500; }
 .access-code-input-row .text-input {
   flex: 1;
   min-width: 0;
+}
+
+.access-code-eye-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  min-width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color .16s ease,
+    color .16s ease,
+    transform .16s ease;
+}
+
+.access-code-eye-btn:hover,
+.access-code-eye-btn:focus-visible {
+  background: rgba(255, 255, 255, .08);
+  box-shadow: none;
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.access-code-eye-btn:active {
+  transform: translateY(0);
+}
+
+.access-code-eye-btn:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+  transform: none;
+}
+
+.access-code-eye-btn .eye-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity .18s ease,
+    transform .18s ease;
+}
+
+.access-code-eye-btn .eye-icon-visible {
+  position: absolute;
+  opacity: 0;
+  transform: scale(.85);
+}
+
+.access-code-eye-btn.is-visible .eye-icon-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.access-code-eye-btn.is-visible .eye-icon-hidden {
+  opacity: 0;
+  transform: scale(.85);
 }
 
 .access-code-error {
