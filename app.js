@@ -130,7 +130,6 @@ const AUDIT_TABLE_HEADER_HTML = `
   <th data-col="location">Location <span class="sort-icon">&#8597;</span></th>
   <th data-col="intake_dates">Intakes <span class="sort-icon">&#8597;</span></th>
   <th data-col="fee_international">Intl. Fee <span class="sort-icon">&#8597;</span></th>
-  <th data-col="entry_ielts">IELTS <span class="sort-icon">&#8597;</span></th>
   <th data-col="scholarship">Scholarship <span class="sort-icon">&#8597;</span></th>
   <th>Details</th>
   <th>Link</th>
@@ -1793,7 +1792,6 @@ function renderTable(programs) {
       <td>${p.location ? esc(p.location) : '<span class="nil">-</span>'}</td>
       <td>${p.intake_dates ? esc(p.intake_dates) : '<span class="nil">-</span>'}</td>
       <td>${feeCell(p)}</td>
-      <td>${p.entry_ielts ? esc(p.entry_ielts) : '<span class="nil">-</span>'}</td>
       <td>${scholarshipCell(p.scholarship)}</td>
       <td><button class="expand-btn" data-idx="${i}">View all</button></td>
       <td>${p.url
