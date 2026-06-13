@@ -1261,3 +1261,19 @@ select,
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
+
+#errorSection {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+#errorText {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 14rem;
+  overflow-y: auto;
+  line-height: 1.45;
+}
