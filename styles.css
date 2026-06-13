@@ -669,6 +669,10 @@ input[type="checkbox"]:checked::after {
   cursor: not-allowed;
   opacity: .85;
 }
+.white-sweep-btn:not(:disabled):hover,
+.white-sweep-btn:not(:disabled):focus-visible {
+  box-shadow: none;
+}
 
 /* ---- Status ------------------------------------------------------- */
 .status-panel { gap: .75rem; }
