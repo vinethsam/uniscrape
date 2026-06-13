@@ -127,7 +127,17 @@
             autocomplete="off"
             spellcheck="false"
           />
-          <button id="scrapeBtn" class="primary-btn extract-programs-btn">Extract Programs</button>
+          <button id="scrapeBtn" class="primary-btn extract-programs-btn" type="button">
+            <span class="extract-btn-label">Extract Programs</span>
+            <span class="extract-btn-loader" aria-hidden="true">
+              <span class="dot-wave">
+                <span class="dot-wave__dot"></span>
+                <span class="dot-wave__dot"></span>
+                <span class="dot-wave__dot"></span>
+                <span class="dot-wave__dot"></span>
+              </span>
+            </span>
+          </button>
         </div>
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>

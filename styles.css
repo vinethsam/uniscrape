@@ -624,6 +624,12 @@ input[type="checkbox"]:checked::after {
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  min-width: 160px;
+  min-height: 44px;
   background: transparent;
   color: #fff;
   border: 2px solid #fff;
@@ -657,20 +663,102 @@ input[type="checkbox"]:checked::after {
   background: #9ca3af;
   transform: translateX(0);
 }
-.extract-programs-btn:disabled,
-.extract-programs-btn[disabled],
+.extract-btn-label,
+.extract-btn-loader {
+  position: relative;
+  z-index: 2;
+}
+.extract-btn-loader {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
 .extract-programs-btn.is-loading {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+  opacity: 1;
+}
+.extract-programs-btn.is-loading .extract-btn-label {
+  display: none;
+}
+.extract-programs-btn.is-loading .extract-btn-loader {
+  display: inline-flex;
+}
+.extract-programs-btn.is-loading::before {
+  background: #fff;
+  transform: translateX(0);
+}
+.extract-programs-btn.is-loading:disabled,
+.extract-programs-btn.is-loading[disabled] {
+  background: #fff;
+  border-color: #fff;
+  color: #000;
+  cursor: wait;
+  opacity: 1;
+}
+.extract-programs-btn.is-loading:disabled::before,
+.extract-programs-btn.is-loading[disabled]::before {
+  background: #fff;
+  transform: translateX(0);
+}
+.extract-programs-btn:disabled:not(.is-loading),
+.extract-programs-btn[disabled]:not(.is-loading) {
   background: #6b7280;
   border-color: #6b7280;
   color: #d1d5db;
   cursor: not-allowed;
   opacity: .85;
 }
-.extract-programs-btn:disabled::before,
-.extract-programs-btn[disabled]::before,
-.extract-programs-btn.is-loading::before {
+.extract-programs-btn:disabled:not(.is-loading)::before,
+.extract-programs-btn[disabled]:not(.is-loading)::before {
   background: #6b7280;
   transform: translateX(0);
+}
+.extract-programs-btn .dot-wave {
+  --uib-size: 30px;
+  --uib-speed: .9s;
+  --uib-color: #0d0909;
+
+  display: flex;
+  flex-flow: row nowrap;
+  align-items: center;
+  justify-content: space-between;
+  width: var(--uib-size);
+  height: calc(var(--uib-size) * .17);
+  padding-top: calc(var(--uib-size) * .34);
+  box-sizing: content-box;
+}
+.extract-programs-btn .dot-wave__dot {
+  flex-shrink: 0;
+  width: calc(var(--uib-size) * .17);
+  height: calc(var(--uib-size) * .17);
+  border-radius: 50%;
+  background-color: var(--uib-color);
+  will-change: transform;
+}
+.extract-programs-btn .dot-wave__dot:nth-child(1) {
+  animation: extractDotWaveJump var(--uib-speed) ease-in-out calc(var(--uib-speed) * -.45) infinite;
+}
+.extract-programs-btn .dot-wave__dot:nth-child(2) {
+  animation: extractDotWaveJump var(--uib-speed) ease-in-out calc(var(--uib-speed) * -.3) infinite;
+}
+.extract-programs-btn .dot-wave__dot:nth-child(3) {
+  animation: extractDotWaveJump var(--uib-speed) ease-in-out calc(var(--uib-speed) * -.15) infinite;
+}
+.extract-programs-btn .dot-wave__dot:nth-child(4) {
+  animation: extractDotWaveJump var(--uib-speed) ease-in-out infinite;
+}
+@keyframes extractDotWaveJump {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-200%);
+  }
 }
 
 /* ---- Status ------------------------------------------------------- */

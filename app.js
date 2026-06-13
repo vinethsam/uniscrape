@@ -499,6 +499,16 @@ function handleExtractClick() {
   ensureAccessCodeThenRun(request);
 }
 
+function setExtractButtonLoading(isLoading) {
+  const loading = Boolean(isLoading);
+  scrapeBtn.classList.toggle("is-loading", loading);
+  if (loading) {
+    scrapeBtn.setAttribute("aria-busy", "true");
+  } else {
+    scrapeBtn.removeAttribute("aria-busy");
+  }
+}
+
 function prepareExtractionRequest() {
   const url = urlInput.value.trim();
   const debugOnly = isDebugMode();
@@ -539,6 +549,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   hideResults();
   hideDebugPanel();
 
+  setExtractButtonLoading(true);
   scrapeBtn.disabled = true;
   startStatusSequence([
     { text: "Connecting to UniScrape backend...", progress: 12 },
@@ -559,6 +570,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
       stopStatusSequence();
       renderDebugPanel();
       scrapeBtn.disabled = false;
+      setExtractButtonLoading(false);
       showStatus("Debug mode - content prepared. Model call skipped.", 100);
       setTimeout(() => hideStatus(), 1500);
       return;
@@ -575,6 +587,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
     if (!programs.length) {
       stopStatusSequence();
       scrapeBtn.disabled = false;
+      setExtractButtonLoading(false);
       if (shouldShowContentDiagnostics()) renderDebugPanel();
       const emptyMessage = activeResultsMode === "catalog"
         ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
@@ -584,6 +597,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   } catch (e) {
     stopStatusSequence();
     scrapeBtn.disabled = false;
+    setExtractButtonLoading(false);
     if (shouldShowContentDiagnostics()) renderDebugPanel();
     if (isInvalidAccessCodeError(e)) {
       handleInvalidAccessCode(request);
@@ -611,6 +625,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   renderResults(url);
   if (shouldShowContentDiagnostics()) renderDebugPanel();
   scrapeBtn.disabled = false;
+  setExtractButtonLoading(false);
 }
 
 function openAccessCodeModal(request, options = {}) {
@@ -683,6 +698,7 @@ function handleInvalidAccessCode(request, options = {}) {
   hideStatus();
   clearError();
   scrapeBtn.disabled = false;
+  setExtractButtonLoading(false);
   setAccessCodeModalLoading(false);
 
   if (keepModalOpen && isAccessCodeModalOpen()) {
