@@ -114,7 +114,6 @@ const accessCodeInput = document.getElementById("accessCodeInput");
 const accessCodeToggle = document.getElementById("accessCodeToggle");
 const accessCodeSubmit = document.getElementById("accessCodeSubmit");
 const accessCodeCancel = document.getElementById("accessCodeCancel");
-const accessCodeClose = document.getElementById("accessCodeClose");
 const accessCodeError = document.getElementById("accessCodeError");
 const countLabel = document.querySelector(".count-label");
 const filterBar = document.querySelector(".filter-bar");
@@ -178,7 +177,7 @@ const CATALOG_CSV_COLUMNS = [
   "modeOfStudy"
 ];
 
-const ACCESS_CODE_SUBMIT_LABEL = "Unlock & Continue";
+const ACCESS_CODE_SUBMIT_LABEL = "Unlock and Continue";
 const ACCESS_CODE_CHECKING_LABEL = "Verifying...";
 let pendingAccessCodeRequest = null;
 let accessCodeChecking = false;
@@ -499,13 +498,21 @@ function handleExtractClick() {
   ensureAccessCodeThenRun(request);
 }
 
-function setExtractButtonLoading(isLoading) {
+function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
+  if (!button) return;
+
   const loading = Boolean(isLoading);
-  scrapeBtn.classList.toggle("is-loading", loading);
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = defaultLabel || button.textContent.trim();
+  }
+
+  button.classList.toggle("is-loading", loading);
   if (loading) {
-    scrapeBtn.setAttribute("aria-busy", "true");
+    button.setAttribute("aria-busy", "true");
+    button.textContent = loadingText;
   } else {
-    scrapeBtn.removeAttribute("aria-busy");
+    button.removeAttribute("aria-busy");
+    button.textContent = button.dataset.defaultLabel;
   }
 }
 
@@ -549,7 +556,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   hideResults();
   hideDebugPanel();
 
-  setExtractButtonLoading(true);
+  setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
   scrapeBtn.disabled = true;
   startStatusSequence([
     { text: "Connecting to UniScrape backend...", progress: 12 },
@@ -570,7 +577,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
       stopStatusSequence();
       renderDebugPanel();
       scrapeBtn.disabled = false;
-      setExtractButtonLoading(false);
+      setButtonLoading(scrapeBtn, false, "", "Extract Programs");
       showStatus("Debug mode - content prepared. Model call skipped.", 100);
       setTimeout(() => hideStatus(), 1500);
       return;
@@ -587,7 +594,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
     if (!programs.length) {
       stopStatusSequence();
       scrapeBtn.disabled = false;
-      setExtractButtonLoading(false);
+      setButtonLoading(scrapeBtn, false, "", "Extract Programs");
       if (shouldShowContentDiagnostics()) renderDebugPanel();
       const emptyMessage = activeResultsMode === "catalog"
         ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
@@ -597,7 +604,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   } catch (e) {
     stopStatusSequence();
     scrapeBtn.disabled = false;
-    setExtractButtonLoading(false);
+    setButtonLoading(scrapeBtn, false, "", "Extract Programs");
     if (shouldShowContentDiagnostics()) renderDebugPanel();
     if (isInvalidAccessCodeError(e)) {
       handleInvalidAccessCode(request);
@@ -625,7 +632,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   renderResults(url);
   if (shouldShowContentDiagnostics()) renderDebugPanel();
   scrapeBtn.disabled = false;
-  setExtractButtonLoading(false);
+  setButtonLoading(scrapeBtn, false, "", "Extract Programs");
 }
 
 function openAccessCodeModal(request, options = {}) {
@@ -668,10 +675,9 @@ function setAccessCodeModalLoading(isLoading) {
   if (accessCodeInput) accessCodeInput.disabled = accessCodeChecking;
   if (accessCodeToggle) accessCodeToggle.disabled = accessCodeChecking;
   if (accessCodeCancel) accessCodeCancel.disabled = accessCodeChecking;
-  if (accessCodeClose) accessCodeClose.disabled = accessCodeChecking;
   if (accessCodeSubmit) {
     accessCodeSubmit.disabled = accessCodeChecking;
-    accessCodeSubmit.textContent = accessCodeChecking ? ACCESS_CODE_CHECKING_LABEL : ACCESS_CODE_SUBMIT_LABEL;
+    setButtonLoading(accessCodeSubmit, accessCodeChecking, ACCESS_CODE_CHECKING_LABEL, ACCESS_CODE_SUBMIT_LABEL);
   }
 }
 
@@ -698,7 +704,7 @@ function handleInvalidAccessCode(request, options = {}) {
   hideStatus();
   clearError();
   scrapeBtn.disabled = false;
-  setExtractButtonLoading(false);
+  setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   setAccessCodeModalLoading(false);
 
   if (keepModalOpen && isAccessCodeModalOpen()) {
@@ -766,7 +772,6 @@ accessCodeToggle?.addEventListener("click", () => {
   accessCodeInput.focus();
 });
 accessCodeCancel?.addEventListener("click", closeAccessCodeModal);
-accessCodeClose?.addEventListener("click", closeAccessCodeModal);
 accessCodeModal?.addEventListener("click", e => {
   if (e.target === accessCodeModal) closeAccessCodeModal();
 });
