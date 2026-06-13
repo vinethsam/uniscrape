@@ -621,56 +621,57 @@ input[type="checkbox"]:checked::after {
 }
 
 .white-sweep-btn {
-  position: relative;
-  overflow: hidden;
   min-width: 160px;
-  background-color: transparent;
-  background-image: linear-gradient(to right, #fff 0%, #fff 100%);
-  background-repeat: no-repeat;
-  background-size: 0% 100%;
-  background-position: left center;
-  color: #fff;
-  border: 1.5px solid #fff;
-  transition:
-    background-size .3s ease,
-    color .3s ease,
-    border-color .3s ease,
-    opacity 180ms ease;
+  background: #fff;
+  color: #000;
+  border: 1px solid #fff;
+  background-image: none;
+  opacity: 1;
+  box-shadow: none;
 }
 .white-sweep-btn:hover,
-.white-sweep-btn:focus-visible {
-  background-size: 100% 100%;
+.white-sweep-btn:focus-visible,
+.white-sweep-btn:not(:disabled):hover,
+.white-sweep-btn:not(:disabled):focus-visible {
+  background: #fff;
   color: #000;
   border-color: #fff;
-  opacity: 1;
-}
-.white-sweep-btn:not(:disabled):active {
-  background-color: #9ca3af;
   background-image: none;
-  border-color: #9ca3af;
-  color: #111827;
+  opacity: 1;
+  box-shadow: none;
+  transform: none;
+}
+.white-sweep-btn:active,
+.white-sweep-btn:not(:disabled):active {
+  background: #fff;
+  background-image: none;
+  border-color: #fff;
+  color: #000;
+  opacity: 1;
+  box-shadow: none;
+  transform: none;
 }
 .white-sweep-btn.is-loading,
 .white-sweep-btn.is-loading:disabled,
 .white-sweep-btn.is-loading[disabled] {
-  background-color: #fff;
+  background: #fff;
   background-image: none;
   border-color: #fff;
   color: #000;
   cursor: wait;
   opacity: 1;
+  box-shadow: none;
 }
+.white-sweep-btn:disabled,
+.white-sweep-btn[disabled],
 .white-sweep-btn:disabled:not(.is-loading),
 .white-sweep-btn[disabled]:not(.is-loading) {
-  background-color: #6b7280;
+  background: #fff;
   background-image: none;
-  border-color: #6b7280;
-  color: #d1d5db;
+  border-color: #fff;
+  color: #000;
   cursor: not-allowed;
-  opacity: .85;
-}
-.white-sweep-btn:not(:disabled):hover,
-.white-sweep-btn:not(:disabled):focus-visible {
+  opacity: 1;
   box-shadow: none;
 }
 
