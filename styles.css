@@ -524,6 +524,12 @@ input[type="checkbox"]:checked::after {
 .primary-btn:hover { opacity: .85; }
 .primary-btn:disabled { opacity: .35; cursor: not-allowed; }
 
+#scrapeBtn:not(:disabled) {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, .08),
+    0 8px 22px rgba(255, 255, 255, .14);
+}
+
 .secondary-btn {
   background: transparent;
   color: var(--accent);
