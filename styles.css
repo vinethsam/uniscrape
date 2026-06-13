@@ -620,6 +620,59 @@ input[type="checkbox"]:checked::after {
   transform: none;
 }
 
+.extract-programs-btn {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: transparent;
+  color: #fff;
+  border: 2px solid #fff;
+}
+.extract-programs-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #fff;
+  transform: translateX(-100%);
+  transition:
+    transform .3s ease,
+    background-color 180ms ease;
+}
+.extract-programs-btn:not(:disabled):hover,
+.extract-programs-btn:not(:disabled):focus-visible {
+  color: #000;
+  opacity: 1;
+}
+.extract-programs-btn:not(:disabled):hover::before,
+.extract-programs-btn:not(:disabled):focus-visible::before {
+  transform: translateX(0);
+}
+.extract-programs-btn:not(:disabled):active {
+  background: #9ca3af;
+  border-color: #9ca3af;
+  color: #111827;
+}
+.extract-programs-btn:not(:disabled):active::before {
+  background: #9ca3af;
+  transform: translateX(0);
+}
+.extract-programs-btn:disabled,
+.extract-programs-btn[disabled],
+.extract-programs-btn.is-loading {
+  background: #6b7280;
+  border-color: #6b7280;
+  color: #d1d5db;
+  cursor: not-allowed;
+  opacity: .85;
+}
+.extract-programs-btn:disabled::before,
+.extract-programs-btn[disabled]::before,
+.extract-programs-btn.is-loading::before {
+  background: #6b7280;
+  transform: translateX(0);
+}
+
 /* ---- Status ------------------------------------------------------- */
 .status-panel { gap: .75rem; }
 .status-row {
