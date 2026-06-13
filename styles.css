@@ -640,8 +640,8 @@ input[type="checkbox"]:checked::after {
   box-shadow:
     8px 8px 18px rgba(0, 0, 0, .42),
     -6px -6px 16px rgba(255, 255, 255, .04),
-    0 0 0 1px rgba(78, 201, 148, .24),
-    0 0 18px rgba(78, 201, 148, .16);
+    0 0 0 1px rgba(255, 255, 255, .14),
+    0 0 18px rgba(255, 255, 255, .16);
 }
 
 .extract-button-experiment:not(:disabled):active {
@@ -649,7 +649,7 @@ input[type="checkbox"]:checked::after {
   box-shadow:
     inset 4px 4px 10px rgba(0, 0, 0, .38),
     inset -4px -4px 10px rgba(255, 255, 255, .04),
-    0 0 12px rgba(78, 201, 148, .14);
+    0 0 12px rgba(255, 255, 255, .12);
 }
 
 .extract-button-experiment:disabled,
