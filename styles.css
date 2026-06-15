@@ -1238,6 +1238,14 @@ footer {
   z-index: 60;
 }
 
+main {
+  z-index: auto;
+}
+
+.footer-wrap {
+  z-index: 2;
+}
+
 #settingsMenuBackdrop.settings-menu-backdrop {
   position: fixed;
   inset: 5.7rem 0 0 0;
@@ -1249,15 +1257,26 @@ footer {
   z-index: 80;
 }
 
+.settings-menu-button {
+  z-index: 91;
+}
+
 .settings-panel {
-  top: calc(100% + .6rem);
+  position: absolute;
+  top: calc(100% + .65rem);
   right: 0;
   z-index: 90;
 }
 
 .modal {
   position: fixed;
-  z-index: 100;
+  inset: 0;
+  z-index: 200;
+}
+
+#modal,
+#accessCodeModal {
+  z-index: 200;
 }
 
 .modal-box {
@@ -1291,11 +1310,15 @@ a,
 .radio-inputs {
   border-color: rgba(78,201,148,.22);
   background: rgba(6, 7, 6, .92);
+  gap: .22rem;
+  padding: .22rem;
 }
 
 .radio-inputs .radio .name {
-  border: 1px solid transparent;
-  color: var(--muted);
+  background: rgba(238,238,234,.90);
+  border: 1px solid rgba(238,238,234,.34);
+  color: #050705;
+  font-weight: 600;
   transition:
     background 220ms ease,
     border-color 220ms ease,
@@ -1305,19 +1328,21 @@ a,
 }
 
 .radio-inputs .radio .name:hover {
-  color: var(--text);
-  border-color: rgba(78,201,148,.28);
-  background: rgba(78,201,148,.055);
+  color: #050705;
+  border-color: rgba(78,201,148,.55);
+  background: #f6f6f1;
+  box-shadow: 0 0 14px rgba(78,201,148,.14);
 }
 
 .radio-inputs .radio input:checked + .name {
-  background: rgba(78,201,148,.16);
+  background: var(--green);
   border-color: var(--green);
-  color: var(--green);
+  color: #050705;
   font-weight: 700;
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.10),
-    0 0 14px rgba(78,201,148,.18);
+    0 0 0 1px rgba(78,201,148,.35),
+    0 0 18px rgba(78,201,148,.25),
+    inset 0 1px 0 rgba(255,255,255,.22);
 }
 
 .radio-inputs .radio input:checked + .name::before {
@@ -1330,22 +1355,75 @@ a,
 }
 
 .slider {
+  display: inline-block;
+  width: var(--button-width);
+  height: var(--button-height);
   border-color: rgba(255,255,255,.22);
+  border-radius: calc(var(--button-height) / 2);
   background: var(--toggle-off-bg);
+  position: relative;
+  transition:
+    background-color 240ms ease,
+    border-color 240ms ease,
+    box-shadow 240ms ease;
 }
 
 .slider::after {
+  content: "";
+  display: inline-block;
+  width: var(--toggle-diameter);
+  height: var(--toggle-diameter);
   background: var(--white-btn);
+  border-radius: calc(var(--toggle-diameter) / 2);
+  position: absolute;
+  top: calc(var(--button-toggle-offset) - 1px);
+  transform: translateX(calc(var(--button-toggle-offset) - 1px));
+  box-shadow: var(--toggle-shadow-offset) 0
+    calc(var(--toggle-shadow-offset) * 4) rgba(0, 0, 0, .18);
+  transition:
+    transform 220ms var(--ease-out),
+    width 160ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.switch {
+  --button-width: 3.5em;
+  --button-height: 2em;
+  --toggle-diameter: 1.5em;
+  --button-toggle-offset: calc((var(--button-height) - var(--toggle-diameter)) / 2);
+  --toggle-shadow-offset: 10px;
+  --toggle-wider: 3em;
 }
 
 .switch input[type="checkbox"]:checked + .slider {
-  background: var(--green);
+  background-color: var(--green);
   border-color: var(--green);
   box-shadow: 0 0 14px rgba(78,201,148,.22);
 }
 
 .switch input[type="checkbox"]:checked + .slider::after {
   background: #06120d;
+  transform: translateX(
+    calc(
+      var(--button-width) - var(--toggle-diameter) - var(--button-toggle-offset) - 1px
+    )
+  );
+  box-shadow: calc(var(--toggle-shadow-offset) * -1) 0
+      calc(var(--toggle-shadow-offset) * 4) rgba(0, 0, 0, .18),
+    0 0 12px rgba(78,201,148,.22);
+}
+
+.switch input[type="checkbox"]:active + .slider::after {
+  width: var(--toggle-wider);
+}
+
+.switch input[type="checkbox"]:checked:active + .slider::after {
+  transform: translateX(
+    calc(
+      var(--button-width) - var(--toggle-wider) - var(--button-toggle-offset) - 1px
+    )
+  );
 }
 
 .switch input[type="checkbox"]:focus-visible + .slider {
@@ -1354,18 +1432,46 @@ a,
 }
 
 .white-sweep-btn {
+  --color: var(--white-btn);
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  background-color: transparent;
+  background-image: none;
+  border-color: var(--color);
+  color: var(--color);
   transition:
-    background-size 840ms cubic-bezier(0.16,1,0.3,1),
+    color 500ms ease,
+    border-color 500ms ease,
     transform 280ms var(--ease-out),
-    color 420ms ease,
-    border-color 420ms ease,
     box-shadow 280ms ease,
     opacity 180ms ease;
 }
 
+.white-sweep-btn::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--color);
+  transition: width 880ms cubic-bezier(0.16,1,0.3,1);
+}
+
+.white-sweep-btn:not(:disabled):hover,
+.white-sweep-btn:not(:disabled):focus-visible {
+  color: var(--white-btn-text);
+  border-color: var(--color);
+}
+
+.white-sweep-btn:not(:disabled):hover::before,
+.white-sweep-btn:not(:disabled):focus-visible::before {
+  width: 100%;
+}
+
 .white-sweep-btn:not(:disabled):active,
 .white-sweep-btn:active {
-  transition-duration: 140ms, 140ms, 140ms, 140ms, 140ms, 140ms;
+  transition-duration: 140ms, 140ms, 140ms, 140ms, 140ms;
 }
 
 .white-sweep-btn.is-loading,
@@ -1374,12 +1480,18 @@ a,
   background-color: var(--white-btn);
   background-image: none;
   background-size: 0% 100%;
-  border-color: rgba(255,255,255,0.28);
+  border-color: var(--white-btn);
   color: var(--white-btn-text);
   cursor: wait;
   opacity: 1;
   box-shadow: none;
   transform: none;
+}
+
+.white-sweep-btn.is-loading::before,
+.white-sweep-btn.is-loading:disabled::before,
+.white-sweep-btn.is-loading[disabled]::before {
+  width: 100%;
 }
 
 .white-sweep-btn:disabled,
@@ -1389,13 +1501,24 @@ a,
   opacity: 1;
 }
 
+.extract-programs-btn:disabled,
+.unlock-continue-btn:disabled,
+#scrapeBtn:disabled,
+#accessCodeSubmit:disabled {
+  opacity: 1;
+}
+
 .white-sweep-btn:disabled:not(.is-loading):hover,
 .white-sweep-btn[disabled]:not(.is-loading):hover {
-  background-size: 0% 100%;
   color: var(--text);
-  border-color: rgba(255,255,255,0.28);
+  border-color: var(--white-btn);
   box-shadow: none;
   transform: none;
+}
+
+.white-sweep-btn:disabled:not(.is-loading):hover::before,
+.white-sweep-btn[disabled]:not(.is-loading):hover::before {
+  width: 0;
 }
 
 @media (max-width: 600px) {
