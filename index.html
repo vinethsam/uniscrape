@@ -35,6 +35,10 @@
 </head>
 <body>
 
+  <div class="bg-base" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+
+  <div class="header-wrap">
   <header>
   <div class="header-inner">
     <div class="site-brand">
@@ -62,6 +66,7 @@
       </label>
 
       <div id="settingsPanel" class="settings-panel" hidden>
+        <div class="settings-panel-label">Settings</div>
         <div id="debugOptions" class="debug-options">
           <label class="settings-row settings-row-toggle">
             <span>Debug mode</span>
@@ -109,6 +114,7 @@
     </div>
   </div>
 </header>
+  </div>
 
 <div id="settingsMenuBackdrop" class="settings-menu-backdrop" hidden></div>
 
@@ -315,9 +321,11 @@
 
   </main>
 
-  <footer>
-    <p>Data sourced exclusively from official university websites. <span class="version-mark">Version 4.0</span></p>
-  </footer>
+  <div class="footer-wrap">
+    <footer>
+      <p>Data sourced exclusively from official university websites. <span class="version-mark">Version 4.0</span></p>
+    </footer>
+  </div>
 
   <script src="app.js"></script>
 </body>
