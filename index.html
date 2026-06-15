@@ -20,16 +20,6 @@
   <meta name="twitter:image" content="https://www.uniscrape.com/og-image.png">
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="styles.css" />
-  <style>
-    .error-body { display: flex; flex-direction: column; gap: 0.75rem; flex: 1; min-width: 0; }
-    .error-retry-btn { align-self: flex-start; }
-    .version-mark { color: var(--text-dim, #3a3a3a); font-size: 0.85em; }
-    .debug-panel .debug-title { font-size: 0.72rem; font-weight: 600; color: var(--accent-dim, #888); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.75rem; }
-    .debug-stats { display: grid; gap: 0.35rem; font-size: 0.78rem; margin-bottom: 1rem; }
-    .debug-k { color: var(--text-muted, #666); margin-right: 0.35rem; }
-    .debug-warnings { margin: 0 0 1rem 1.1rem; font-size: 0.76rem; color: var(--yellow, #e5c07b); }
-    .debug-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
@@ -123,7 +113,7 @@
     <!-- Input Panel -->
     <section class="panel panel-input">
       <div class="field-group">
-        <label class="field-label">University Programs Page URL</label>
+        <label class="field-label" for="urlInput">University Programs Page URL</label>
         <div class="input-row">
           <input
             type="url"
@@ -265,7 +255,7 @@
       <div class="modal-box">
         <div class="modal-header">
           <span id="modalTitle" class="modal-title"></span>
-          <button id="modalClose" class="modal-close">x</button>
+          <button id="modalClose" class="modal-close" aria-label="Close">×</button>
         </div>
         <div id="modalBody" class="modal-body"></div>
       </div>
