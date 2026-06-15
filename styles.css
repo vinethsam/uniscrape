@@ -1235,7 +1235,7 @@ footer {
 
 .header-wrap {
   position: relative;
-  z-index: 60;
+  z-index: 120;
 }
 
 main {
@@ -1249,39 +1249,41 @@ main {
 #settingsMenuBackdrop.settings-menu-backdrop {
   position: fixed;
   inset: 5.7rem 0 0 0;
-  z-index: 40;
+  z-index: 80;
 }
 
 .settings-menu {
   position: relative;
-  z-index: 80;
+  z-index: 130;
 }
 
 .settings-menu-button {
-  z-index: 91;
+  z-index: 141;
 }
 
 .settings-panel {
   position: absolute;
-  top: calc(100% + .65rem);
+  top: calc(100% + 1.05rem);
   right: 0;
-  z-index: 90;
+  z-index: 140;
 }
 
 .modal {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 1000;
 }
 
 #modal,
 #accessCodeModal {
-  z-index: 200;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
 }
 
 .modal-box {
   position: relative;
-  z-index: 1;
+  z-index: 1001;
 }
 
 a,
@@ -1304,6 +1306,22 @@ a,
 
 .debug-panel .debug-title,
 .debug-k {
+  color: var(--muted);
+}
+
+.debug-panel {
+  color: var(--text);
+}
+
+.debug-stats {
+  color: var(--text);
+}
+
+.debug-warnings {
+  color: var(--yellow);
+}
+
+.count-num {
   color: var(--green);
 }
 
@@ -1315,10 +1333,10 @@ a,
 }
 
 .radio-inputs .radio .name {
-  background: rgba(238,238,234,.90);
-  border: 1px solid rgba(238,238,234,.34);
-  color: #050705;
-  font-weight: 600;
+  background: rgba(5, 7, 6, .82);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: var(--text);
+  font-weight: 500;
   transition:
     background 220ms ease,
     border-color 220ms ease,
@@ -1327,10 +1345,16 @@ a,
     transform 180ms ease;
 }
 
+.radio-inputs .radio input:not(:checked) + .name {
+  background: rgba(5, 7, 6, .82);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, .12);
+}
+
 .radio-inputs .radio .name:hover {
-  color: #050705;
+  color: var(--text);
   border-color: rgba(78,201,148,.55);
-  background: #f6f6f1;
+  background: rgba(9, 13, 10, .94);
   box-shadow: 0 0 14px rgba(78,201,148,.14);
 }
 
@@ -1437,14 +1461,15 @@ a,
   z-index: 1;
   overflow: hidden;
   background-color: transparent;
-  background-image: none;
+  background-image: none !important;
+  background-size: 0 0 !important;
   border-color: var(--color);
   color: var(--color);
   transition:
-    color 500ms ease,
+    transform 260ms ease,
     border-color 500ms ease,
-    transform 280ms var(--ease-out),
-    box-shadow 280ms ease,
+    color 500ms ease,
+    box-shadow 500ms ease,
     opacity 180ms ease;
 }
 
@@ -1452,21 +1477,24 @@ a,
   content: "";
   position: absolute;
   z-index: -1;
-  inset: 0 auto 0 0;
-  width: 0;
+  inset: 0;
   background: var(--color);
-  transition: width 880ms cubic-bezier(0.16,1,0.3,1);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 900ms cubic-bezier(0.22,1,0.36,1);
 }
 
 .white-sweep-btn:not(:disabled):hover,
 .white-sweep-btn:not(:disabled):focus-visible {
+  background-image: none !important;
+  background-size: 0 0 !important;
   color: var(--white-btn-text);
   border-color: var(--color);
 }
 
 .white-sweep-btn:not(:disabled):hover::before,
 .white-sweep-btn:not(:disabled):focus-visible::before {
-  width: 100%;
+  transform: scaleX(1);
 }
 
 .white-sweep-btn:not(:disabled):active,
@@ -1491,7 +1519,7 @@ a,
 .white-sweep-btn.is-loading::before,
 .white-sweep-btn.is-loading:disabled::before,
 .white-sweep-btn.is-loading[disabled]::before {
-  width: 100%;
+  transform: scaleX(1);
 }
 
 .white-sweep-btn:disabled,
@@ -1518,7 +1546,7 @@ a,
 
 .white-sweep-btn:disabled:not(.is-loading):hover::before,
 .white-sweep-btn[disabled]:not(.is-loading):hover::before {
-  width: 0;
+  transform: scaleX(0);
 }
 
 @media (max-width: 600px) {
