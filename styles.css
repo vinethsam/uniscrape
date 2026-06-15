@@ -1263,7 +1263,7 @@ main {
 
 .settings-panel {
   position: absolute;
-  top: calc(100% + 1.05rem);
+  top: calc(100% + 1.35rem);
   right: 0;
   z-index: 140;
 }
@@ -1334,7 +1334,7 @@ a,
 
 .radio-inputs .radio .name {
   background: rgba(5, 7, 6, .82);
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid transparent;
   color: var(--text);
   font-weight: 500;
   transition:
@@ -1346,15 +1346,16 @@ a,
 }
 
 .radio-inputs .radio input:not(:checked) + .name {
-  background: rgba(5, 7, 6, .82);
+  background: rgba(5, 7, 6, .88);
   color: var(--text);
-  border: 1px solid rgba(255, 255, 255, .12);
+  border: 1px solid transparent;
+  box-shadow: none;
 }
 
 .radio-inputs .radio .name:hover {
   color: var(--text);
   border-color: rgba(78,201,148,.55);
-  background: rgba(9, 13, 10, .94);
+  background: rgba(12, 16, 13, .96);
   box-shadow: 0 0 14px rgba(78,201,148,.14);
 }
 
@@ -1463,7 +1464,8 @@ a,
   background-color: transparent;
   background-image: none !important;
   background-size: 0 0 !important;
-  border-color: var(--color);
+  border-width: 1px;
+  border-color: rgba(240, 240, 235, .72);
   color: var(--color);
   transition:
     transform 260ms ease,
@@ -1479,9 +1481,8 @@ a,
   z-index: -1;
   inset: 0;
   background: var(--color);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 900ms cubic-bezier(0.22,1,0.36,1);
+  transform: translateX(-102%);
+  transition: transform 1000ms cubic-bezier(0.22,1,0.36,1);
 }
 
 .white-sweep-btn:not(:disabled):hover,
@@ -1489,12 +1490,12 @@ a,
   background-image: none !important;
   background-size: 0 0 !important;
   color: var(--white-btn-text);
-  border-color: var(--color);
+  border-color: rgba(240, 240, 235, .9);
 }
 
 .white-sweep-btn:not(:disabled):hover::before,
 .white-sweep-btn:not(:disabled):focus-visible::before {
-  transform: scaleX(1);
+  transform: translateX(0);
 }
 
 .white-sweep-btn:not(:disabled):active,
@@ -1508,7 +1509,8 @@ a,
   background-color: var(--white-btn);
   background-image: none;
   background-size: 0% 100%;
-  border-color: var(--white-btn);
+  border-width: 1px;
+  border-color: rgba(240, 240, 235, .9);
   color: var(--white-btn-text);
   cursor: wait;
   opacity: 1;
@@ -1519,14 +1521,23 @@ a,
 .white-sweep-btn.is-loading::before,
 .white-sweep-btn.is-loading:disabled::before,
 .white-sweep-btn.is-loading[disabled]::before {
-  transform: scaleX(1);
+  transform: translateX(0);
 }
 
 .white-sweep-btn:disabled,
 .white-sweep-btn[disabled],
 .white-sweep-btn:disabled:not(.is-loading),
 .white-sweep-btn[disabled]:not(.is-loading) {
+  background-color: var(--white-btn);
+  background-image: none !important;
+  background-size: 0 0 !important;
+  border-width: 1px;
+  border-color: rgba(240, 240, 235, .9);
+  color: var(--white-btn-text);
+  cursor: wait;
   opacity: 1;
+  box-shadow: none;
+  transform: none;
 }
 
 .extract-programs-btn:disabled,
@@ -1538,15 +1549,20 @@ a,
 
 .white-sweep-btn:disabled:not(.is-loading):hover,
 .white-sweep-btn[disabled]:not(.is-loading):hover {
-  color: var(--text);
-  border-color: var(--white-btn);
+  color: var(--white-btn-text);
+  border-color: rgba(240, 240, 235, .9);
   box-shadow: none;
   transform: none;
 }
 
 .white-sweep-btn:disabled:not(.is-loading):hover::before,
 .white-sweep-btn[disabled]:not(.is-loading):hover::before {
-  transform: scaleX(0);
+  transform: translateX(0);
+}
+
+.panel-input:hover,
+.panel-input:focus-within {
+  transform: translateY(-1px);
 }
 
 @media (max-width: 600px) {
