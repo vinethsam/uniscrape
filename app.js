@@ -887,7 +887,7 @@ function initStaticRoutes() {
   }
 
   if (databasesRoute) {
-    document.title = "Databases - UniScrape";
+    document.title = "UniScrape - Databases";
   }
 }
 
