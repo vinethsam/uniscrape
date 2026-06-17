@@ -118,6 +118,8 @@ const accessCodeError = document.getElementById("accessCodeError");
 const countLabel = document.querySelector(".count-label");
 const filterBar = document.querySelector(".filter-bar");
 const tableHeaderRow = document.querySelector("#programTable thead tr");
+const databasesPage = document.getElementById("databasesPage");
+const databasesNavLink = document.querySelector('.settings-nav-link[href="/databases"]');
 
 const AUDIT_TABLE_HEADER_HTML = `
   <th class="col-num">#</th>
@@ -289,6 +291,7 @@ let debugKeySeqAt = 0;
 const buttonDefaultLabels = new WeakMap();
 
 initSettingsMenu();
+initStaticRoutes();
 
 if (debugModeInput) {
   debugModeInput.checked = localStorage.getItem("uniscrape_debug") === "1";
@@ -851,6 +854,41 @@ function resetDebugState() {
     modelUsed: "",
     source: "",
   };
+}
+
+function getStaticRoutePath() {
+  let path = window.location.pathname || "/";
+  path = path.replace(/\/index\.html$/i, "");
+  path = path.replace(/\/+$/, "") || "/";
+  return path;
+}
+
+function isDatabasesRoute() {
+  return getStaticRoutePath() === "/databases";
+}
+
+function initStaticRoutes() {
+  const databasesRoute = isDatabasesRoute();
+
+  document.body.classList.toggle("route-databases", databasesRoute);
+  document.body.classList.toggle("route-extractor", !databasesRoute);
+
+  if (databasesPage) {
+    databasesPage.hidden = !databasesRoute;
+    databasesPage.classList.toggle("hidden", !databasesRoute);
+  }
+
+  if (databasesNavLink) {
+    if (databasesRoute) {
+      databasesNavLink.setAttribute("aria-current", "page");
+    } else {
+      databasesNavLink.removeAttribute("aria-current");
+    }
+  }
+
+  if (databasesRoute) {
+    document.title = "Databases - UniScrape";
+  }
 }
 
 function initSettingsMenu() {

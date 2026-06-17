@@ -330,6 +330,34 @@ header {
 .settings-row-toggle { cursor: pointer; }
 .settings-row-column { align-items: stretch; flex-direction: column; gap: .38rem; }
 
+.settings-nav-link {
+  min-height: 2.25rem;
+  margin-bottom: .78rem;
+  padding: .58rem .64rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,0.034);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.settings-nav-link:hover,
+.settings-nav-link:focus-visible {
+  background: rgba(255,255,255,0.06);
+  border-color: var(--border-mid);
+  color: var(--text);
+  text-decoration: none;
+}
+.settings-nav-link:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.settings-nav-link[aria-current="page"] {
+  border-color: rgba(78,201,148,0.32);
+  color: var(--green);
+  background: var(--green-trace);
+}
+
 /* ---- Radio group ------------------------------------------------- */
 .radio-inputs {
   display: grid;
@@ -500,6 +528,154 @@ main {
     transform    320ms var(--ease-out),
     box-shadow   320ms ease,
     border-color 260ms ease;
+}
+
+body.route-databases .extractor-view,
+body.route-extractor #databasesPage,
+#databasesPage[hidden] {
+  display: none !important;
+}
+
+.databases-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.databases-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .2rem .15rem 0;
+}
+
+.databases-header h1 {
+  color: var(--text);
+  font-size: 1.28rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.databases-back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.databases-back-link:hover,
+.databases-back-link:focus-visible {
+  text-decoration: none;
+}
+
+.databases-card {
+  gap: 1.25rem;
+}
+
+.databases-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.databases-card-heading h2 {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0;
+  margin-bottom: .46rem;
+}
+
+.databases-card-heading p {
+  max-width: 820px;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.72;
+}
+
+.database-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: .28rem .58rem;
+  border: 1px solid rgba(78,201,148,.24);
+  border-radius: var(--r-xs);
+  color: var(--green);
+  background: var(--green-trace);
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.database-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.database-action-btn:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.database-modules {
+  display: flex;
+  flex-direction: column;
+  gap: .62rem;
+  padding-top: .15rem;
+}
+
+.database-modules ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: .5rem;
+  list-style: none;
+}
+
+.database-modules li {
+  min-height: 2.35rem;
+  display: flex;
+  align-items: center;
+  padding: .55rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgba(5, 7, 6, .72);
+  color: var(--text);
+  font-size: .72rem;
+  line-height: 1.35;
+}
+
+@media (max-width: 600px) {
+  .databases-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .databases-back-link {
+    width: 100%;
+  }
+
+  .databases-card-heading {
+    flex-direction: column;
+  }
+
+  .database-status {
+    align-self: flex-start;
+  }
+
+  .database-action-btn {
+    flex: 1 1 100%;
+  }
 }
 
 /* Input panel hover: subtle lift + underglow */
