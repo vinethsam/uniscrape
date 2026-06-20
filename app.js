@@ -42,6 +42,7 @@ let currentSession = {
 };
 let pendingGoogleIdToken = "";
 let pendingPollInterval = null;
+let pendingScrapeAction = null;
 
 let debugState = {
   rawHtml: "",
@@ -136,16 +137,19 @@ const filterBar = document.querySelector(".filter-bar");
 const tableHeaderRow = document.querySelector("#programTable thead tr");
 const databasesPage = document.getElementById("databasesPage");
 const databasesNavLink = document.querySelector('.settings-nav-link[href="/databases"]');
-const authContainer = document.getElementById("authContainer");
-const googleSignInBtn = document.getElementById("googleSignInBtn");
-const namePromptPanel = document.getElementById("namePromptPanel");
-const displayNameInput = document.getElementById("displayNameInput");
-const saveNameBtn = document.getElementById("saveNameBtn");
-const pendingPanel = document.getElementById("pendingPanel");
-const sessionContent = document.getElementById("sessionContent");
+const authModal = document.getElementById("authModal");
+const authModalBody = document.getElementById("authModalBody");
+const authModalClose = document.getElementById("authModalClose");
 const adminSection = document.getElementById("adminSection");
 const pendingUsersList = document.getElementById("pendingUsersList");
 const approvedUsersList = document.getElementById("approvedUsersList");
+const accountBadge = document.getElementById("accountBadge");
+const accountBadgeInitial = document.getElementById("accountBadgeInitial");
+const accountDropdown = document.getElementById("accountDropdown");
+const accountDropdownName = document.getElementById("accountDropdownName");
+const accountDropdownEmail = document.getElementById("accountDropdownEmail");
+const adminShortcutBtn = document.getElementById("adminShortcutBtn");
+const signOutBtn = document.getElementById("signOutBtn");
 
 const AUDIT_TABLE_HEADER_HTML = `
   <th class="col-num">#</th>
@@ -238,22 +242,67 @@ function syncAccessCodeVisibilityToggle() {
   accessCodeToggle.setAttribute("aria-pressed", String(isVisible));
 }
 
-function setAuthView(view) {
-  authContainer?.classList.toggle("hidden", view !== "signin");
-  namePromptPanel?.classList.toggle("hidden", view !== "name");
-  pendingPanel?.classList.toggle("hidden", view !== "pending");
-  sessionContent?.classList.toggle("hidden", view !== "session");
+function openAuthModal(onSuccess = null) {
+  pendingScrapeAction = typeof onSuccess === "function" ? onSuccess : null;
+  authModal?.classList.remove("hidden");
+  renderAuthModalState("signin");
 }
 
-function showAuthError(message) {
-  showError(message);
-  retryBtn?.classList.add("hidden");
+function closeAuthModal() {
+  authModal?.classList.add("hidden");
 }
 
-function initGoogleSignIn() {
-  if (!googleSignInBtn) return;
+function renderAuthModalMessage(message) {
+  if (!authModalBody) return;
+  authModalBody.innerHTML = `<p class="field-hint">${esc(message)}</p>`;
+}
+
+function renderAuthModalState(state) {
+  if (!authModalBody) return;
+
+  if (state !== "pending" && pendingPollInterval) {
+    clearInterval(pendingPollInterval);
+    pendingPollInterval = null;
+  }
+
+  if (state === "signin") {
+    authModalBody.innerHTML = `
+      <p class="field-hint">Sign in with your Google account to use UniScrape.</p>
+      <div id="googleSignInBtn" style="margin-top: 0.75rem;"></div>
+    `;
+    renderGoogleButton();
+    return;
+  }
+
+  if (state === "needs_name") {
+    authModalBody.innerHTML = `
+      <p class="field-label">What name should scrapes be attributed to?</p>
+      <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Vineth" maxlength="80" />
+      <button id="saveNameBtn" class="primary-btn" style="margin-top:0.75rem;">Continue</button>
+    `;
+    const displayNameInput = document.getElementById("displayNameInput");
+    document.getElementById("saveNameBtn")?.addEventListener("click", submitDisplayName);
+    displayNameInput?.addEventListener("keydown", e => {
+      if (e.key === "Enter") submitDisplayName();
+    });
+    displayNameInput?.focus();
+    return;
+  }
+
+  if (state === "pending") {
+    authModalBody.innerHTML = `
+      <p class="field-label">Access requested</p>
+      <p class="field-hint">An admin needs to approve your account before you can use UniScrape. This will update automatically once approved.</p>
+    `;
+    pollForApproval();
+  }
+}
+
+function renderGoogleButton() {
+  const googleButton = document.getElementById("googleSignInBtn");
+  if (!googleButton) return;
   if (!window.google || !window.google.accounts) {
-    setTimeout(initGoogleSignIn, 300);
+    setTimeout(renderGoogleButton, 300);
     return;
   }
 
@@ -262,20 +311,25 @@ function initGoogleSignIn() {
     callback: handleGoogleSignIn,
   });
   google.accounts.id.renderButton(
-    googleSignInBtn,
-    { theme: "outline", size: "large", shape: "pill", text: "signin_with" }
+    googleButton,
+    {
+      theme: "filled_black",
+      size: "large",
+      shape: "pill",
+      text: "signin_with",
+      logo_alignment: "left",
+    }
   );
 }
 
 async function handleGoogleSignIn(response) {
   pendingGoogleIdToken = response?.credential || "";
   if (!pendingGoogleIdToken) {
-    showAuthError("Sign-in failed: Google did not return an identity token.");
+    renderAuthModalMessage("Sign-in failed: Google did not return an identity token.");
     return;
   }
 
-  clearError();
-  showStatus("Checking your account...", 30);
+  renderAuthModalMessage("Checking your account...");
 
   try {
     const res = await fetch(AUTH_GOOGLE_URL, {
@@ -284,55 +338,44 @@ async function handleGoogleSignIn(response) {
       body: JSON.stringify({ id_token: pendingGoogleIdToken }),
     });
     const data = await res.json().catch(() => ({}));
-    hideStatus();
 
     if (!res.ok) {
-      showAuthError(data.detail || "Sign-in could not be completed.");
+      renderAuthModalMessage(data.detail || "Sign-in could not be completed.");
       return;
     }
-
     if (data.status === "needs_name") {
-      setAuthView("name");
-      displayNameInput?.focus();
+      renderAuthModalState("needs_name");
       return;
     }
-
     if (data.status === "pending") {
-      setAuthView("pending");
-      pollForApproval();
+      renderAuthModalState("pending");
       return;
     }
-
     if (data.status === "approved") {
       applySession(data);
       return;
     }
 
-    showAuthError("Sign-in returned an unexpected account status.");
+    renderAuthModalMessage("Sign-in returned an unexpected account status.");
   } catch (e) {
-    hideStatus();
-    showAuthError("Sign-in failed: " + e.message);
+    renderAuthModalMessage("Sign-in failed: " + e.message);
   }
 }
 
 function applySession(data) {
   const sessionToken = data.session_token || currentSession.token;
   if (!sessionToken) {
-    setAuthView("signin");
-    showAuthError("Sign-in completed without a session token. Please try again.");
+    renderAuthModalMessage("Sign-in completed without a session token. Please try again.");
     return;
   }
 
   currentSession = {
     token: sessionToken,
-    email: data.email || "",
+    email: data.email || currentSession.email || "",
     name: data.name || currentSession.name || "",
     isAdmin: Boolean(data.is_admin),
   };
-
-  if (sessionToken) {
-    localStorage.setItem("uniscrape_session_token", sessionToken);
-  }
+  localStorage.setItem("uniscrape_session_token", sessionToken);
   localStorage.setItem("uniscrape_display_name", currentSession.name);
 
   if (pendingPollInterval) {
@@ -340,9 +383,7 @@ function applySession(data) {
     pendingPollInterval = null;
   }
   pendingGoogleIdToken = "";
-  clearError();
-  hideStatus();
-  setAuthView("session");
+  closeAuthModal();
 
   adminSection?.classList.toggle("hidden", !currentSession.isAdmin);
   if (currentSession.isAdmin) {
@@ -351,22 +392,22 @@ function applySession(data) {
     if (pendingUsersList) pendingUsersList.innerHTML = "";
     if (approvedUsersList) approvedUsersList.innerHTML = "";
   }
+
+  updateAccountBadge();
+
+  if (pendingScrapeAction) {
+    const action = pendingScrapeAction;
+    pendingScrapeAction = null;
+    action();
+  }
 }
 
 async function submitDisplayName() {
-  const name = displayNameInput?.value?.trim();
-  if (!name) {
-    showAuthError("Please enter a name.");
-    return;
-  }
-  if (!pendingGoogleIdToken) {
-    setAuthView("signin");
-    showAuthError("Your Google sign-in expired. Please sign in again.");
-    return;
-  }
+  const name = document.getElementById("displayNameInput")?.value?.trim();
+  if (!name) return;
 
-  clearError();
-  showStatus("Saving...", 50);
+  renderAuthModalMessage("Saving...");
+
   try {
     const res = await fetch(`${AUTH_SETNAME_URL}?name=${encodeURIComponent(name)}`, {
       method: "POST",
@@ -374,34 +415,28 @@ async function submitDisplayName() {
       body: JSON.stringify({ id_token: pendingGoogleIdToken }),
     });
     const data = await res.json().catch(() => ({}));
-    hideStatus();
     if (!res.ok) {
-      showAuthError(data.detail || "Could not save name.");
+      renderAuthModalMessage(data.detail || "Could not save name.");
       return;
     }
-
+    if (data.status === "needs_name") {
+      renderAuthModalState("needs_name");
+      return;
+    }
     if (data.status === "pending") {
-      setAuthView("pending");
-      pollForApproval();
+      renderAuthModalState("pending");
       return;
     }
-
     if (data.status === "approved" || data.session_token) {
       applySession(data);
       return;
     }
 
-    showAuthError("Saving your name returned an unexpected account status.");
+    renderAuthModalMessage("Saving your name returned an unexpected account status.");
   } catch (e) {
-    hideStatus();
-    showAuthError("Failed to save name: " + e.message);
+    renderAuthModalMessage("Failed: " + e.message);
   }
 }
-
-saveNameBtn?.addEventListener("click", submitDisplayName);
-displayNameInput?.addEventListener("keydown", e => {
-  if (e.key === "Enter") submitDisplayName();
-});
 
 function pollForApproval() {
   if (pendingPollInterval) clearInterval(pendingPollInterval);
@@ -418,8 +453,7 @@ function pollForApproval() {
       if (data.status === "needs_name") {
         clearInterval(pendingPollInterval);
         pendingPollInterval = null;
-        setAuthView("name");
-        displayNameInput?.focus();
+        renderAuthModalState("needs_name");
       } else if (data.status === "approved") {
         clearInterval(pendingPollInterval);
         pendingPollInterval = null;
@@ -432,7 +466,10 @@ function pollForApproval() {
 }
 
 async function restoreSession() {
-  if (!currentSession.token) return;
+  if (!currentSession.token) {
+    updateAccountBadge();
+    return;
+  }
 
   try {
     const res = await fetch(AUTH_STATUS_URL, {
@@ -440,14 +477,18 @@ async function restoreSession() {
     });
     if (!res.ok) {
       localStorage.removeItem("uniscrape_session_token");
-      currentSession.token = "";
-      setAuthView("signin");
+      localStorage.removeItem("uniscrape_display_name");
+      currentSession = { token: "", email: "", name: "", isAdmin: false };
+      adminSection?.classList.add("hidden");
+      updateAccountBadge();
       return;
     }
     const data = await res.json();
     applySession(data);
   } catch {
-    // Network error: leave the sign-in view available.
+    currentSession = { token: "", email: "", name: "", isAdmin: false };
+    adminSection?.classList.add("hidden");
+    updateAccountBadge();
   }
 }
 
@@ -523,13 +564,79 @@ async function handleAdminAction(url, email) {
     }
     loadAdminLists();
   } catch (e) {
-    showAuthError("Admin action failed: " + e.message);
+    showError("Admin action failed: " + e.message);
   }
 }
 
+function updateAccountBadge() {
+  if (!accountBadge || !accountBadgeInitial) return;
+
+  const signedIn = Boolean(currentSession.token && currentSession.name);
+  accountBadge.classList.toggle("signed-in", signedIn);
+  accountBadgeInitial.textContent = signedIn
+    ? currentSession.name.trim().charAt(0).toUpperCase()
+    : "";
+  accountBadge.setAttribute("aria-label", signedIn ? `Account for ${currentSession.name}` : "Sign in");
+
+  if (accountDropdownName) accountDropdownName.textContent = signedIn ? currentSession.name : "";
+  if (accountDropdownEmail) accountDropdownEmail.textContent = signedIn ? currentSession.email : "";
+  adminShortcutBtn?.classList.toggle("hidden", !signedIn || !currentSession.isAdmin);
+}
+
+authModalClose?.addEventListener("click", closeAuthModal);
+authModal?.addEventListener("click", e => {
+  if (e.target === authModal) closeAuthModal();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && authModal && !authModal.classList.contains("hidden")) {
+    closeAuthModal();
+  }
+});
+
+accountBadge?.addEventListener("click", () => {
+  if (!currentSession.token) {
+    openAuthModal(null);
+    return;
+  }
+  setSettingsMenuOpen(false);
+  accountDropdown?.classList.toggle("hidden");
+});
+
+signOutBtn?.addEventListener("click", () => {
+  localStorage.removeItem("uniscrape_session_token");
+  localStorage.removeItem("uniscrape_display_name");
+  currentSession = { token: "", email: "", name: "", isAdmin: false };
+  pendingScrapeAction = null;
+  if (pendingPollInterval) {
+    clearInterval(pendingPollInterval);
+    pendingPollInterval = null;
+  }
+  accountDropdown?.classList.add("hidden");
+  adminSection?.classList.add("hidden");
+  updateAccountBadge();
+});
+
+adminShortcutBtn?.addEventListener("click", () => {
+  accountDropdown?.classList.add("hidden");
+  setSettingsMenuOpen(true);
+  setTimeout(() => {
+    adminSection?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, 0);
+});
+
+document.addEventListener("click", e => {
+  if (!accountDropdown || !accountBadge) return;
+  if (
+    !accountDropdown.classList.contains("hidden")
+    && !accountDropdown.contains(e.target)
+    && !accountBadge.contains(e.target)
+  ) {
+    accountDropdown.classList.add("hidden");
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   restoreSession();
-  initGoogleSignIn();
 });
 
 //Persist settings
@@ -825,10 +932,19 @@ retryBtn.addEventListener("click", () => { clearError(); handleExtractClick(); }
 urlInput.addEventListener("keydown", e => { if (e.key === "Enter") handleExtractClick(); });
 
 function handleExtractClick() {
+  if (!decodeSessionLooksValid(currentSession.token)) {
+    openAuthModal(handleExtractClick);
+    return;
+  }
+
   const request = prepareExtractionRequest();
   if (!request) return;
 
   ensureAccessCodeThenRun(request);
+}
+
+function decodeSessionLooksValid(token) {
+  return Boolean(String(token || "").trim());
 }
 
 function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
@@ -1246,6 +1362,7 @@ function isSettingsMenuOpen() {
 function setSettingsMenuOpen(isOpen) {
   if (!settingsMenuToggle || !settingsPanel || !settingsMenuButton) return;
 
+  if (isOpen) accountDropdown?.classList.add("hidden");
   settingsMenuToggle.checked = Boolean(isOpen);
   settingsPanel.hidden = !isOpen;
   if (settingsMenuBackdrop) settingsMenuBackdrop.hidden = !isOpen;

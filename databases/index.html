@@ -40,6 +40,10 @@
       </div>
     </div>
     <div class="settings-menu">
+      <button id="accountBadge" class="account-badge" aria-label="Account">
+        <span id="accountBadgeInitial"></span>
+      </button>
+
       <label
         class="hamburger settings-menu-button"
         role="button"
@@ -55,6 +59,13 @@
           <path class="line line-top-bottom line-bottom" d="M6 22h20"></path>
         </svg>
       </label>
+
+      <div id="accountDropdown" class="account-dropdown hidden">
+        <div class="account-dropdown-name" id="accountDropdownName"></div>
+        <div class="account-dropdown-email" id="accountDropdownEmail"></div>
+        <button id="adminShortcutBtn" class="ghost-btn hidden" style="width:100%; margin-top:0.5rem;">Team Access</button>
+        <button id="signOutBtn" class="secondary-btn" style="width:100%; margin-top:0.5rem;">Sign Out</button>
+      </div>
 
       <div id="settingsPanel" class="settings-panel" hidden>
         <div class="settings-panel-label">Settings</div>
@@ -118,22 +129,6 @@
 
   <main>
 
-    <div id="authContainer" class="field-group panel">
-      <div id="googleSignInBtn"></div>
-      <p class="field-hint" id="authHint">Sign in with your Google account to use UniScrape.</p>
-    </div>
-
-    <div id="namePromptPanel" class="panel hidden">
-      <p class="field-label">What name should scrapes be attributed to?</p>
-      <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Vineth" maxlength="80" />
-      <button id="saveNameBtn" class="primary-btn">Continue</button>
-    </div>
-
-    <div id="pendingPanel" class="panel hidden">
-      <p class="field-label">Access requested</p>
-      <p class="field-hint">An admin needs to approve your account before you can use UniScrape. This page will update automatically once approved.</p>
-    </div>
-
     <!-- Status -->
     <section id="statusSection" class="panel status-panel hidden">
       <div class="status-row">
@@ -156,7 +151,6 @@
       </div>
     </section>
 
-    <div id="sessionContent" class="databases-page hidden">
     <section id="databasesPage" class="databases-page hidden" hidden aria-labelledby="databasesTitle">
       <div class="databases-header">
         <div>
@@ -324,6 +318,14 @@
       </div>
     </div>
 
+    <div id="authModal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <span class="modal-title">Sign in to continue</span>
+          <button id="authModalClose" class="modal-close" aria-label="Close">x</button>
+        </div>
+        <div id="authModalBody" class="modal-body"></div>
+      </div>
     </div>
 
   </main>
