@@ -113,7 +113,7 @@ const contentModeInputs = Array.from(document.querySelectorAll('input[name="cont
 const settingsMenuToggle = document.getElementById("settingsMenuToggle");
 const settingsMenuButton = document.querySelector(".settings-menu-button");
 const settingsPanel = document.getElementById("settingsPanel");
-const settingsMenuBackdrop = document.getElementById("settingsMenuBackdrop");
+const pageBackdrop = document.getElementById("pageBackdrop");
 const catalogToggleInput = document.getElementById("catalogToggle");
 const debugPanel       = document.getElementById("debugPanel");
 const debugStatsEl     = document.getElementById("debugStats");
@@ -221,6 +221,7 @@ function showAccessCodeModalElement() {
   accessCodeModal.hidden = false;
   accessCodeModal.classList.remove("hidden");
   accessCodeModal.setAttribute("aria-hidden", "false");
+  showBackdrop();
 }
 
 function hideAccessCodeModalElement() {
@@ -228,6 +229,7 @@ function hideAccessCodeModalElement() {
   accessCodeModal.classList.add("hidden");
   accessCodeModal.setAttribute("hidden", "");
   accessCodeModal.setAttribute("aria-hidden", "true");
+  hideBackdrop();
 }
 
 function isAccessCodeModalOpen() {
@@ -243,18 +245,49 @@ function syncAccessCodeVisibilityToggle() {
   accessCodeToggle.setAttribute("aria-pressed", String(isVisible));
 }
 
+function isClassLayerOpen(element) {
+  return Boolean(element && !element.classList.contains("hidden"));
+}
+
+function needsPageBackdrop() {
+  return (
+    isSettingsMenuOpen()
+    || isClassLayerOpen(accountDropdown)
+    || isClassLayerOpen(authModal)
+    || isClassLayerOpen(teamAccessModal)
+    || isClassLayerOpen(modal)
+    || isAccessCodeModalOpen()
+  );
+}
+
+function showBackdrop() {
+  if (!pageBackdrop) return;
+  pageBackdrop.classList.remove("hidden");
+  pageBackdrop.classList.add("visible");
+  document.body.classList.add("page-backdrop-visible");
+}
+
+function hideBackdrop() {
+  if (!pageBackdrop || needsPageBackdrop()) return;
+  pageBackdrop.classList.remove("visible");
+  document.body.classList.remove("page-backdrop-visible");
+}
+
 function openAuthModal(onSuccess = null) {
   pendingScrapeAction = typeof onSuccess === "function" ? onSuccess : null;
   authModal?.classList.remove("hidden");
+  showBackdrop();
   renderAuthModalState("signin");
 }
 
 function closeAuthModal() {
   authModal?.classList.add("hidden");
+  hideBackdrop();
 }
 
 function closeTeamAccessModal() {
   teamAccessModal?.classList.add("hidden");
+  hideBackdrop();
 }
 
 function renderAuthModalMessage(message) {
@@ -630,6 +663,11 @@ accountBadge?.addEventListener("click", () => {
   }
   setSettingsMenuOpen(false);
   accountDropdown?.classList.toggle("hidden");
+  if (isClassLayerOpen(accountDropdown)) {
+    showBackdrop();
+  } else {
+    hideBackdrop();
+  }
 });
 
 signOutBtn?.addEventListener("click", () => {
@@ -643,6 +681,7 @@ signOutBtn?.addEventListener("click", () => {
   }
   accountDropdown?.classList.add("hidden");
   closeTeamAccessModal();
+  hideBackdrop();
   updateAccountBadge();
 });
 
@@ -650,6 +689,7 @@ adminShortcutBtn?.addEventListener("click", () => {
   accountDropdown?.classList.add("hidden");
   setSettingsMenuOpen(false);
   teamAccessModal?.classList.remove("hidden");
+  showBackdrop();
   loadAdminLists();
 });
 
@@ -661,7 +701,14 @@ document.addEventListener("click", e => {
     && !accountBadge.contains(e.target)
   ) {
     accountDropdown.classList.add("hidden");
+    hideBackdrop();
   }
+});
+
+pageBackdrop?.addEventListener("click", () => {
+  accountDropdown?.classList.add("hidden");
+  setSettingsMenuOpen(false);
+  hideBackdrop();
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1394,8 +1441,11 @@ function setSettingsMenuOpen(isOpen) {
   if (isOpen) accountDropdown?.classList.add("hidden");
   settingsMenuToggle.checked = Boolean(isOpen);
   settingsPanel.hidden = !isOpen;
-  if (settingsMenuBackdrop) settingsMenuBackdrop.hidden = !isOpen;
-  document.body.classList.toggle("settings-menu-open", Boolean(isOpen));
+  if (isOpen) {
+    showBackdrop();
+  } else {
+    hideBackdrop();
+  }
   settingsMenuButton.setAttribute("aria-expanded", String(Boolean(isOpen)));
   settingsMenuButton.setAttribute("aria-label", isOpen ? "Close settings menu" : "Open settings menu");
 }
@@ -2629,11 +2679,19 @@ function openModal(p) {
 
   bindFieldCopyButtons(modalBody);
   modal.classList.remove("hidden");
+  showBackdrop();
 }
 
-modalClose.addEventListener("click", () => modal.classList.add("hidden"));
-modal.addEventListener("click", e => { if (e.target === modal) modal.classList.add("hidden"); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") modal.classList.add("hidden"); });
+function closeProgramModal() {
+  modal.classList.add("hidden");
+  hideBackdrop();
+}
+
+modalClose.addEventListener("click", closeProgramModal);
+modal.addEventListener("click", e => { if (e.target === modal) closeProgramModal(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !modal.classList.contains("hidden")) closeProgramModal();
+});
 
 //Sorting
 function bindSortableHeaders() {
