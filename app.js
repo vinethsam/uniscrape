@@ -277,7 +277,7 @@ function renderAuthModalState(state) {
   if (state === "needs_name") {
     authModalBody.innerHTML = `
       <p class="field-label">What name should scrapes be attributed to?</p>
-      <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Vineth" maxlength="80" />
+      <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Timothy" maxlength="80" />
       <button id="saveNameBtn" class="primary-btn" style="margin-top:0.75rem;">Continue</button>
     `;
     const displayNameInput = document.getElementById("displayNameInput");
