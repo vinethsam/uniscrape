@@ -1262,11 +1262,13 @@ td.name-cell { max-width: 210px; font-weight: 500; }
 #authModal #googleSignInBtn {
   display: flex;
   justify-content: center;
+  align-items: center;
+  width: 100%;
   margin-top: 0.15rem;
 }
 
-#authModal #googleSignInBtn > div {
-  width: 100% !important;
+#authModal #googleSignInBtn iframe {
+  margin: 0 auto !important;
 }
 
 #teamAccessModal .modal-box {
