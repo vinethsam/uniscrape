@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="../styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -100,6 +101,12 @@
               </label>
             </div>
           </div>
+
+          <div id="adminSection" class="hidden">
+            <div class="debug-title">Team Access</div>
+            <div id="pendingUsersList"></div>
+            <div id="approvedUsersList"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -111,6 +118,45 @@
 
   <main>
 
+    <div id="authContainer" class="field-group panel">
+      <div id="googleSignInBtn"></div>
+      <p class="field-hint" id="authHint">Sign in with your Google account to use UniScrape.</p>
+    </div>
+
+    <div id="namePromptPanel" class="panel hidden">
+      <p class="field-label">What name should scrapes be attributed to?</p>
+      <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Vineth" maxlength="80" />
+      <button id="saveNameBtn" class="primary-btn">Continue</button>
+    </div>
+
+    <div id="pendingPanel" class="panel hidden">
+      <p class="field-label">Access requested</p>
+      <p class="field-hint">An admin needs to approve your account before you can use UniScrape. This page will update automatically once approved.</p>
+    </div>
+
+    <!-- Status -->
+    <section id="statusSection" class="panel status-panel hidden">
+      <div class="status-row">
+        <span class="spinner"></span>
+        <span id="statusText">Working...</span>
+      </div>
+      <div class="progress-track">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </section>
+
+    <!-- Error -->
+    <section id="errorSection" class="hidden">
+      <div class="error-box">
+        <span class="error-label">ERROR</span>
+        <div class="error-body">
+          <span id="errorText"></span>
+          <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="sessionContent" class="databases-page hidden">
     <section id="databasesPage" class="databases-page hidden" hidden aria-labelledby="databasesTitle">
       <div class="databases-header">
         <div>
@@ -187,28 +233,6 @@
         <button type="button" id="downloadPreviewBtn" class="ghost-btn">Download Extraction Preview</button>
         <button type="button" id="downloadApiResponseBtn" class="ghost-btn hidden debug-api-only">Download API Response</button>
         <button type="button" id="downloadFinalMdBtn" class="ghost-btn hidden debug-api-only">Download Final Extraction Markdown</button>
-      </div>
-    </section>
-
-    <!-- Status -->
-    <section id="statusSection" class="panel status-panel extractor-view hidden">
-      <div class="status-row">
-        <span class="spinner"></span>
-        <span id="statusText">Working...</span>
-      </div>
-      <div class="progress-track">
-        <div id="progressFill" class="progress-fill"></div>
-      </div>
-    </section>
-
-    <!-- Error -->
-    <section id="errorSection" class="extractor-view hidden">
-      <div class="error-box">
-        <span class="error-label">ERROR</span>
-        <div class="error-body">
-          <span id="errorText"></span>
-          <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
-        </div>
       </div>
     </section>
 
@@ -300,52 +324,6 @@
       </div>
     </div>
 
-    <!-- Access Code Modal -->
-    <div id="accessCodeModal" class="modal extractor-view hidden" hidden role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="accessCodeTitle">
-      <div class="modal-box access-code-box">
-        <div class="modal-body access-code-body">
-          <label id="accessCodeTitle" for="accessCodeInput" class="field-label access-code-title">Access code</label>
-          <div class="access-code-input-row">
-            <input
-              type="password"
-              id="accessCodeInput"
-              class="text-input"
-              placeholder="Enter code to continue..."
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button
-              id="accessCodeToggle"
-              type="button"
-              class="access-code-eye-btn"
-              aria-label="Show access code"
-              aria-pressed="false"
-            >
-              <span class="eye-icon eye-icon-hidden" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
-                  <path d="M3 3l18 18"></path>
-                  <path d="M10.6 10.6A2 2 0 0 0 13.4 13.4"></path>
-                  <path d="M9.9 4.4A10.8 10.8 0 0 1 12 4c6.5 0 10 8 10 8a18.5 18.5 0 0 1-3.1 4.4"></path>
-                  <path d="M6.1 6.1C3.5 8 2 12 2 12s3.5 8 10 8a10.8 10.8 0 0 0 5.1-1.3"></path>
-                </svg>
-              </span>
-              <span class="eye-icon eye-icon-visible" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
-                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
-                  <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-              </span>
-            </button>
-          </div>
-          <p id="accessCodeError" class="access-code-error hidden"></p>
-          <div class="access-code-actions">
-            <button id="accessCodeCancel" type="button" class="ghost-btn access-clear-btn">Clear</button>
-            <button id="accessCodeSubmit" type="button" class="primary-btn btn white-sweep-btn unlock-continue-btn">
-              <span class="btn-label">Unlock and Continue</span>
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
 
   </main>

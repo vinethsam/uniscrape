@@ -5,6 +5,14 @@
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
 const VERIFY_ACCESS_API_URL = new URL("/verify-access", EXTRACT_API_URL).toString();
+const AUTH_GOOGLE_URL = "https://api.uniscrape.com/auth/google";
+const AUTH_SETNAME_URL = "https://api.uniscrape.com/auth/set-name-with-token";
+const AUTH_STATUS_URL = "https://api.uniscrape.com/auth/status";
+const ADMIN_PENDING_URL = "https://api.uniscrape.com/admin/pending";
+const ADMIN_APPROVED_URL = "https://api.uniscrape.com/admin/approved";
+const ADMIN_APPROVE_URL = "https://api.uniscrape.com/admin/approve";
+const ADMIN_REJECT_URL = "https://api.uniscrape.com/admin/reject";
+const GOOGLE_CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com";
 const EXTRACT_TIMEOUT_MS = 300000;
 const VERIFY_ACCESS_TIMEOUT_MS = 15000;
 const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
@@ -26,6 +34,14 @@ let sortDir = 1;
 let copyValueIdCounter = 0;
 const copyValueStore = new Map();
 const COPY_FIELD_FEEDBACK_MS = 1000;
+let currentSession = {
+  token: localStorage.getItem("uniscrape_session_token") || "",
+  email: "",
+  name: localStorage.getItem("uniscrape_display_name") || "",
+  isAdmin: false,
+};
+let pendingGoogleIdToken = "";
+let pendingPollInterval = null;
 
 let debugState = {
   rawHtml: "",
@@ -120,6 +136,16 @@ const filterBar = document.querySelector(".filter-bar");
 const tableHeaderRow = document.querySelector("#programTable thead tr");
 const databasesPage = document.getElementById("databasesPage");
 const databasesNavLink = document.querySelector('.settings-nav-link[href="/databases"]');
+const authContainer = document.getElementById("authContainer");
+const googleSignInBtn = document.getElementById("googleSignInBtn");
+const namePromptPanel = document.getElementById("namePromptPanel");
+const displayNameInput = document.getElementById("displayNameInput");
+const saveNameBtn = document.getElementById("saveNameBtn");
+const pendingPanel = document.getElementById("pendingPanel");
+const sessionContent = document.getElementById("sessionContent");
+const adminSection = document.getElementById("adminSection");
+const pendingUsersList = document.getElementById("pendingUsersList");
+const approvedUsersList = document.getElementById("approvedUsersList");
 
 const AUDIT_TABLE_HEADER_HTML = `
   <th class="col-num">#</th>
@@ -211,6 +237,300 @@ function syncAccessCodeVisibilityToggle() {
   accessCodeToggle.setAttribute("aria-label", isVisible ? "Hide access code" : "Show access code");
   accessCodeToggle.setAttribute("aria-pressed", String(isVisible));
 }
+
+function setAuthView(view) {
+  authContainer?.classList.toggle("hidden", view !== "signin");
+  namePromptPanel?.classList.toggle("hidden", view !== "name");
+  pendingPanel?.classList.toggle("hidden", view !== "pending");
+  sessionContent?.classList.toggle("hidden", view !== "session");
+}
+
+function showAuthError(message) {
+  showError(message);
+  retryBtn?.classList.add("hidden");
+}
+
+function initGoogleSignIn() {
+  if (!googleSignInBtn) return;
+  if (!window.google || !window.google.accounts) {
+    setTimeout(initGoogleSignIn, 300);
+    return;
+  }
+
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleSignIn,
+  });
+  google.accounts.id.renderButton(
+    googleSignInBtn,
+    { theme: "outline", size: "large", shape: "pill", text: "signin_with" }
+  );
+}
+
+async function handleGoogleSignIn(response) {
+  pendingGoogleIdToken = response?.credential || "";
+  if (!pendingGoogleIdToken) {
+    showAuthError("Sign-in failed: Google did not return an identity token.");
+    return;
+  }
+
+  clearError();
+  showStatus("Checking your account...", 30);
+
+  try {
+    const res = await fetch(AUTH_GOOGLE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: pendingGoogleIdToken }),
+    });
+    const data = await res.json().catch(() => ({}));
+    hideStatus();
+
+    if (!res.ok) {
+      showAuthError(data.detail || "Sign-in could not be completed.");
+      return;
+    }
+
+    if (data.status === "needs_name") {
+      setAuthView("name");
+      displayNameInput?.focus();
+      return;
+    }
+
+    if (data.status === "pending") {
+      setAuthView("pending");
+      pollForApproval();
+      return;
+    }
+
+    if (data.status === "approved") {
+      applySession(data);
+      return;
+    }
+
+    showAuthError("Sign-in returned an unexpected account status.");
+  } catch (e) {
+    hideStatus();
+    showAuthError("Sign-in failed: " + e.message);
+  }
+}
+
+function applySession(data) {
+  const sessionToken = data.session_token || currentSession.token;
+  if (!sessionToken) {
+    setAuthView("signin");
+    showAuthError("Sign-in completed without a session token. Please try again.");
+    return;
+  }
+
+  currentSession = {
+    token: sessionToken,
+    email: data.email || "",
+    name: data.name || currentSession.name || "",
+    isAdmin: Boolean(data.is_admin),
+  };
+
+  if (sessionToken) {
+    localStorage.setItem("uniscrape_session_token", sessionToken);
+  }
+  localStorage.setItem("uniscrape_display_name", currentSession.name);
+
+  if (pendingPollInterval) {
+    clearInterval(pendingPollInterval);
+    pendingPollInterval = null;
+  }
+  pendingGoogleIdToken = "";
+  clearError();
+  hideStatus();
+  setAuthView("session");
+
+  adminSection?.classList.toggle("hidden", !currentSession.isAdmin);
+  if (currentSession.isAdmin) {
+    loadAdminLists();
+  } else {
+    if (pendingUsersList) pendingUsersList.innerHTML = "";
+    if (approvedUsersList) approvedUsersList.innerHTML = "";
+  }
+}
+
+async function submitDisplayName() {
+  const name = displayNameInput?.value?.trim();
+  if (!name) {
+    showAuthError("Please enter a name.");
+    return;
+  }
+  if (!pendingGoogleIdToken) {
+    setAuthView("signin");
+    showAuthError("Your Google sign-in expired. Please sign in again.");
+    return;
+  }
+
+  clearError();
+  showStatus("Saving...", 50);
+  try {
+    const res = await fetch(`${AUTH_SETNAME_URL}?name=${encodeURIComponent(name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: pendingGoogleIdToken }),
+    });
+    const data = await res.json().catch(() => ({}));
+    hideStatus();
+    if (!res.ok) {
+      showAuthError(data.detail || "Could not save name.");
+      return;
+    }
+
+    if (data.status === "pending") {
+      setAuthView("pending");
+      pollForApproval();
+      return;
+    }
+
+    if (data.status === "approved" || data.session_token) {
+      applySession(data);
+      return;
+    }
+
+    showAuthError("Saving your name returned an unexpected account status.");
+  } catch (e) {
+    hideStatus();
+    showAuthError("Failed to save name: " + e.message);
+  }
+}
+
+saveNameBtn?.addEventListener("click", submitDisplayName);
+displayNameInput?.addEventListener("keydown", e => {
+  if (e.key === "Enter") submitDisplayName();
+});
+
+function pollForApproval() {
+  if (pendingPollInterval) clearInterval(pendingPollInterval);
+  pendingPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(AUTH_GOOGLE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_token: pendingGoogleIdToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+
+      if (data.status === "needs_name") {
+        clearInterval(pendingPollInterval);
+        pendingPollInterval = null;
+        setAuthView("name");
+        displayNameInput?.focus();
+      } else if (data.status === "approved") {
+        clearInterval(pendingPollInterval);
+        pendingPollInterval = null;
+        applySession(data);
+      }
+    } catch {
+      // Silent: retry on the next interval.
+    }
+  }, 8000);
+}
+
+async function restoreSession() {
+  if (!currentSession.token) return;
+
+  try {
+    const res = await fetch(AUTH_STATUS_URL, {
+      headers: { Authorization: `Bearer ${currentSession.token}` },
+    });
+    if (!res.ok) {
+      localStorage.removeItem("uniscrape_session_token");
+      currentSession.token = "";
+      setAuthView("signin");
+      return;
+    }
+    const data = await res.json();
+    applySession(data);
+  } catch {
+    // Network error: leave the sign-in view available.
+  }
+}
+
+async function loadAdminLists() {
+  if (!currentSession.isAdmin) return;
+  const headers = { Authorization: `Bearer ${currentSession.token}` };
+
+  try {
+    const [pendingRes, approvedRes] = await Promise.all([
+      fetch(ADMIN_PENDING_URL, { headers }),
+      fetch(ADMIN_APPROVED_URL, { headers }),
+    ]);
+    if (!pendingRes.ok || !approvedRes.ok) {
+      throw new Error("Admin access list request failed.");
+    }
+
+    const pending = await pendingRes.json();
+    const approved = await approvedRes.json();
+    renderAdminLists(pending, approved);
+  } catch (e) {
+    console.warn("Failed to load admin lists:", e.message);
+  }
+}
+
+function renderAdminLists(pending, approved) {
+  if (!pendingUsersList || !approvedUsersList) return;
+
+  const pendingUsers = Array.isArray(pending) ? pending : [];
+  const approvedUsers = Array.isArray(approved) ? approved : [];
+
+  pendingUsersList.innerHTML = pendingUsers.length
+    ? pendingUsers.map(user => `
+        <div class="settings-row">
+          <span class="debug-k">${esc(user.email || "")}</span>
+          <span class="debug-actions">
+            <button type="button" class="secondary-btn admin-approve-btn" data-email="${esc(user.email || "")}">Approve</button>
+            <button type="button" class="ghost-btn admin-reject-btn" data-email="${esc(user.email || "")}">Reject</button>
+          </span>
+        </div>
+      `).join("")
+    : '<p class="field-hint">No pending requests.</p>';
+
+  approvedUsersList.innerHTML = approvedUsers.length
+    ? `<p class="field-label">Team (${approvedUsers.length})</p>` +
+      approvedUsers.map(user => `
+        <div class="settings-row">
+          <span class="debug-k">${esc(user.name || "(name pending)")} - ${esc(user.email || "")}${user.is_admin ? " (admin)" : ""}</span>
+        </div>
+      `).join("")
+    : "";
+
+  pendingUsersList.querySelectorAll(".admin-approve-btn").forEach(button => {
+    button.addEventListener("click", () => handleAdminAction(ADMIN_APPROVE_URL, button.dataset.email));
+  });
+  pendingUsersList.querySelectorAll(".admin-reject-btn").forEach(button => {
+    button.addEventListener("click", () => handleAdminAction(ADMIN_REJECT_URL, button.dataset.email));
+  });
+}
+
+async function handleAdminAction(url, email) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${currentSession.token}`,
+      },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || "The admin action was not accepted.");
+    }
+    loadAdminLists();
+  } catch (e) {
+    showAuthError("Admin action failed: " + e.message);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  restoreSession();
+  initGoogleSignIn();
+});
 
 //Persist settings
 function readSessionValue(key) {

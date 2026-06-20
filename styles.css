@@ -1328,7 +1328,7 @@ td.name-cell { max-width: 210px; font-weight: 500; }
 .unlock-continue-btn { margin-left: auto; }
 
 /* ---- Debug panel ------------------------------------------------- */
-.debug-panel .debug-title {
+.debug-title {
   font-size: .64rem; font-weight: 600;
   color: var(--muted); letter-spacing: .10em;
   text-transform: uppercase; margin-bottom: .72rem;
@@ -1480,7 +1480,7 @@ a,
   color: var(--green);
 }
 
-.debug-panel .debug-title,
+.debug-title,
 .debug-k {
   color: var(--muted);
 }
