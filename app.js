@@ -268,7 +268,7 @@ function renderAuthModalState(state) {
   if (state === "signin") {
     authModalBody.innerHTML = `
       <p class="field-hint">Sign in with your Google account to use UniScrape.</p>
-      <div id="googleSignInBtn" style="margin-top: 0.75rem;"></div>
+      <div id="googleSignInBtn"></div>
     `;
     renderGoogleButton();
     return;
@@ -278,7 +278,7 @@ function renderAuthModalState(state) {
     authModalBody.innerHTML = `
       <p class="field-label">What name should scrapes be attributed to?</p>
       <input type="text" id="displayNameInput" class="text-input" placeholder="e.g. Timothy" maxlength="80" />
-      <button id="saveNameBtn" class="primary-btn" style="margin-top:0.75rem;">Continue</button>
+      <button id="saveNameBtn" class="primary-btn">Continue</button>
     `;
     const displayNameInput = document.getElementById("displayNameInput");
     document.getElementById("saveNameBtn")?.addEventListener("click", submitDisplayName);
