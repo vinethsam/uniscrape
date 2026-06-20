@@ -140,7 +140,8 @@ const databasesNavLink = document.querySelector('.settings-nav-link[href="/datab
 const authModal = document.getElementById("authModal");
 const authModalBody = document.getElementById("authModalBody");
 const authModalClose = document.getElementById("authModalClose");
-const adminSection = document.getElementById("adminSection");
+const teamAccessModal = document.getElementById("teamAccessModal");
+const teamAccessModalClose = document.getElementById("teamAccessModalClose");
 const pendingUsersList = document.getElementById("pendingUsersList");
 const approvedUsersList = document.getElementById("approvedUsersList");
 const accountBadge = document.getElementById("accountBadge");
@@ -252,6 +253,10 @@ function closeAuthModal() {
   authModal?.classList.add("hidden");
 }
 
+function closeTeamAccessModal() {
+  teamAccessModal?.classList.add("hidden");
+}
+
 function renderAuthModalMessage(message) {
   if (!authModalBody) return;
   authModalBody.innerHTML = `<p class="field-hint">${esc(message)}</p>`;
@@ -266,8 +271,10 @@ function renderAuthModalState(state) {
   }
 
   if (state === "signin") {
+    const cachedName = localStorage.getItem("uniscrape_display_name") || "";
     authModalBody.innerHTML = `
-      <p class="field-hint">Sign in with your Google account to use UniScrape.</p>
+      <p class="field-hint">Sign in to use UniScrape.</p>
+      <input type="text" id="preSignInNameInput" class="text-input" placeholder="Your name, e.g. Timothy" maxlength="80" value="${esc(cachedName)}" />
       <div id="googleSignInBtn"></div>
     `;
     renderGoogleButton();
@@ -329,7 +336,25 @@ async function handleGoogleSignIn(response) {
     return;
   }
 
+  const typedName = document.getElementById("preSignInNameInput")?.value?.trim() || "";
   renderAuthModalMessage("Checking your account...");
+
+  if (typedName) {
+    try {
+      const res = await fetch(`${AUTH_SETNAME_URL}?name=${encodeURIComponent(typedName)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_token: pendingGoogleIdToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === "approved") {
+        applySession(data);
+        return;
+      }
+    } catch {
+      // Fall through to the normal Google sign-in flow.
+    }
+  }
 
   try {
     const res = await fetch(AUTH_GOOGLE_URL, {
@@ -385,10 +410,8 @@ function applySession(data) {
   pendingGoogleIdToken = "";
   closeAuthModal();
 
-  adminSection?.classList.toggle("hidden", !currentSession.isAdmin);
-  if (currentSession.isAdmin) {
-    loadAdminLists();
-  } else {
+  if (!currentSession.isAdmin) {
+    closeTeamAccessModal();
     if (pendingUsersList) pendingUsersList.innerHTML = "";
     if (approvedUsersList) approvedUsersList.innerHTML = "";
   }
@@ -479,7 +502,7 @@ async function restoreSession() {
       localStorage.removeItem("uniscrape_session_token");
       localStorage.removeItem("uniscrape_display_name");
       currentSession = { token: "", email: "", name: "", isAdmin: false };
-      adminSection?.classList.add("hidden");
+      closeTeamAccessModal();
       updateAccountBadge();
       return;
     }
@@ -487,7 +510,7 @@ async function restoreSession() {
     applySession(data);
   } catch {
     currentSession = { token: "", email: "", name: "", isAdmin: false };
-    adminSection?.classList.add("hidden");
+    closeTeamAccessModal();
     updateAccountBadge();
   }
 }
@@ -587,9 +610,16 @@ authModalClose?.addEventListener("click", closeAuthModal);
 authModal?.addEventListener("click", e => {
   if (e.target === authModal) closeAuthModal();
 });
+teamAccessModalClose?.addEventListener("click", closeTeamAccessModal);
+teamAccessModal?.addEventListener("click", e => {
+  if (e.target === teamAccessModal) closeTeamAccessModal();
+});
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && authModal && !authModal.classList.contains("hidden")) {
     closeAuthModal();
+  }
+  if (e.key === "Escape" && teamAccessModal && !teamAccessModal.classList.contains("hidden")) {
+    closeTeamAccessModal();
   }
 });
 
@@ -612,16 +642,15 @@ signOutBtn?.addEventListener("click", () => {
     pendingPollInterval = null;
   }
   accountDropdown?.classList.add("hidden");
-  adminSection?.classList.add("hidden");
+  closeTeamAccessModal();
   updateAccountBadge();
 });
 
 adminShortcutBtn?.addEventListener("click", () => {
   accountDropdown?.classList.add("hidden");
-  setSettingsMenuOpen(true);
-  setTimeout(() => {
-    adminSection?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, 0);
+  setSettingsMenuOpen(false);
+  teamAccessModal?.classList.remove("hidden");
+  loadAdminLists();
 });
 
 document.addEventListener("click", e => {
@@ -1366,6 +1395,7 @@ function setSettingsMenuOpen(isOpen) {
   settingsMenuToggle.checked = Boolean(isOpen);
   settingsPanel.hidden = !isOpen;
   if (settingsMenuBackdrop) settingsMenuBackdrop.hidden = !isOpen;
+  document.body.classList.toggle("settings-menu-open", Boolean(isOpen));
   settingsMenuButton.setAttribute("aria-expanded", String(Boolean(isOpen)));
   settingsMenuButton.setAttribute("aria-label", isOpen ? "Close settings menu" : "Open settings menu");
 }

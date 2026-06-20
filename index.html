@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://accounts.google.com/gsi/client?hl=en" async defer></script>
 </head>
 <body>
 
@@ -113,11 +113,6 @@
             </div>
           </div>
 
-          <div id="adminSection" class="hidden">
-            <div class="debug-title">Team Access</div>
-            <div id="pendingUsersList"></div>
-            <div id="approvedUsersList"></div>
-          </div>
         </div>
       </div>
     </div>
@@ -325,6 +320,19 @@
           <button id="authModalClose" class="modal-close" aria-label="Close">x</button>
         </div>
         <div id="authModalBody" class="modal-body"></div>
+      </div>
+    </div>
+
+    <div id="teamAccessModal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <span class="modal-title">Team Access</span>
+          <button id="teamAccessModalClose" class="modal-close" type="button" aria-label="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="pendingUsersList"></div>
+          <div id="approvedUsersList"></div>
+        </div>
       </div>
     </div>
 
