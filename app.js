@@ -321,7 +321,11 @@ function renderAuthModalState(state) {
         <div id="googleSignInBtn" class="google-btn-real"></div>
       </div>
     `;
-    renderGoogleButton();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        renderGoogleButton();
+      });
+    });
     return;
   }
 
@@ -357,6 +361,7 @@ function renderGoogleButton() {
 
   const googleButton = document.getElementById("googleSignInBtn");
   if (!googleButton) return;
+  const safeWidth = Math.min(googleButton.offsetWidth || 280, 280);
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleGoogleSignIn,
@@ -368,8 +373,14 @@ function renderGoogleButton() {
       size: "large",
       shape: "pill",
       text: "signin_with",
-      width: googleButton.offsetWidth || 280,
+      width: safeWidth > 0 ? safeWidth : 280,
     }
+  );
+  console.log(
+    "[auth] Google button rendered. Container size:",
+    googleButton.offsetWidth,
+    "x",
+    googleButton.offsetHeight
   );
 }
 
