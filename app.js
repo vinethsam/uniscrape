@@ -1113,16 +1113,23 @@ scrapeBtn.addEventListener("click", handleExtractClick);
 retryBtn.addEventListener("click", () => { clearError(); handleExtractClick(); });
 urlInput.addEventListener("keydown", e => { if (e.key === "Enter") handleExtractClick(); });
 
-function handleExtractClick() {
-  if (!decodeSessionLooksValid(currentSession.token)) {
-    openAuthModal(handleExtractClick);
-    return;
+function handleExtractClick(event) {
+  event?.preventDefault();
+  if (scrapeBtn.disabled) return;
+
+  try {
+    if (!decodeSessionLooksValid(currentSession.token)) {
+      openAuthModal(handleExtractClick);
+      return;
+    }
+
+    const request = prepareExtractionRequest();
+    if (!request) return;
+
+    ensureAccessCodeThenRun(request);
+  } catch (error) {
+    handleFrontendExtractionError(error);
   }
-
-  const request = prepareExtractionRequest();
-  if (!request) return;
-
-  ensureAccessCodeThenRun(request);
 }
 
 function decodeSessionLooksValid(token) {
@@ -1202,19 +1209,22 @@ async function runExtractionWithAccessCode(request, accessCode) {
 
   setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
   scrapeBtn.disabled = true;
-  setStatusDetail(depthOne ? "Depth-1 extraction enabled — this may take a few minutes for larger sites." : "");
-  startStatusSequence(buildExtractionStatusSequence(depthOne), 3000);
 
   let programs = [];
 
   try {
+    try {
+      setStatusDetail(depthOne ? "Depth-1 extraction enabled — this may take a few minutes for larger sites." : "");
+      startStatusSequence(buildExtractionStatusSequence(depthOne), 3000);
+    } catch (progressError) {
+      stopStatusSequence();
+      if (debugOnly) console.warn("Could not start extraction progress messages.", progressError);
+    }
+
     const result = await useBackendExtract(url, debugOnly, accessCode, catalogMode, depthOne);
 
     if (debugOnly) {
-      stopStatusSequence();
       renderDebugPanel();
-      scrapeBtn.disabled = false;
-      setButtonLoading(scrapeBtn, false, "", "Extract Programs");
       showStatus("Debug mode - content prepared. Model call skipped.", 100);
       setStatusDetail("");
       setTimeout(() => hideStatus(), 1500);
@@ -1230,9 +1240,6 @@ async function runExtractionWithAccessCode(request, accessCode) {
     }
 
     if (!programs.length) {
-      stopStatusSequence();
-      scrapeBtn.disabled = false;
-      setButtonLoading(scrapeBtn, false, "", "Extract Programs");
       if (shouldShowContentDiagnostics()) renderDebugPanel();
       const emptyMessage = activeResultsMode === "catalog"
         ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
@@ -1245,38 +1252,52 @@ async function runExtractionWithAccessCode(request, accessCode) {
         ? "Depth-1 returned a partial result. You can still review/export the extracted rows."
         : "Partial result returned. Some detail pages may have failed or timed out, but usable data was extracted.");
     }
-  } catch (e) {
+
     stopStatusSequence();
-    scrapeBtn.disabled = false;
-    setButtonLoading(scrapeBtn, false, "", "Extract Programs");
+    showStatus("Mapping subjects...", 82);
+
+    if (activeResultsMode !== "catalog") {
+      programs = programs.map(p => {
+        p = mapSubjects(p);
+        p = applyFinancialAidStatement(p);
+        return p;
+      });
+    }
+
+    showStatus("Rendering results...", 96);
+    allPrograms = programs;
+
+    await sleep(250);
+    hideStatus();
+    renderResults(url);
     if (shouldShowContentDiagnostics()) renderDebugPanel();
-    if (isInvalidAccessCodeError(e)) {
+  } catch (error) {
+    if (shouldShowContentDiagnostics()) renderDebugPanel();
+    if (isInvalidAccessCodeError(error)) {
       handleInvalidAccessCode(request);
       return;
     }
-    return showError("Extraction failed: " + e.message);
+    if (debugOnly) console.error("UniScrape extraction failed.", error);
+    showError("Extraction failed: " + getErrorMessage(error));
+  } finally {
+    stopStatusSequence();
+    scrapeBtn.disabled = false;
+    setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   }
+}
 
+function handleFrontendExtractionError(error) {
   stopStatusSequence();
-  showStatus("Mapping subjects...", 82);
-
-  if (activeResultsMode !== "catalog") {
-    programs = programs.map(p => {
-      p = mapSubjects(p);
-      p = applyFinancialAidStatement(p);
-      return p;
-    });
-  }
-
-  showStatus("Rendering results...", 96);
-  allPrograms = programs;
-
-  await sleep(250);
-  hideStatus();
-  renderResults(url);
-  if (shouldShowContentDiagnostics()) renderDebugPanel();
   scrapeBtn.disabled = false;
   setButtonLoading(scrapeBtn, false, "", "Extract Programs");
+  if (isDebugMode()) console.error("UniScrape could not start extraction.", error);
+  showError("Could not start extraction: " + getErrorMessage(error));
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error && error.message
+    ? error.message
+    : String(error || "Unknown frontend error.");
 }
 
 function buildExtractionStatusSequence(depthOne) {
