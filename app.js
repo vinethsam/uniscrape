@@ -3,7 +3,7 @@
 */
 
 // Backend extraction config
-const EXTRACT_API_URL = "https://api.uniscrape.com/extract";
+const EXTRACT_API_URL = "https://api.uniscrape.com/crawl";
 const VERIFY_ACCESS_API_URL = new URL("/verify-access", EXTRACT_API_URL).toString();
 const AUTH_GOOGLE_URL = "https://api.uniscrape.com/auth/google";
 const AUTH_SETNAME_URL = "https://api.uniscrape.com/auth/set-name-with-token";
@@ -1009,10 +1009,9 @@ async function verifyAccessCode(accessCode) {
   return data;
 }
 
-function buildBackendExtractPayload(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
+function buildBackendExtractPayload(url, debugOnly, catalogMode = false, depthOne = false) {
   const payload = {
     url,
-    password: accessCode,
     debug: debugOnly,
     extract_details: Boolean(depthOne),
   };
@@ -1028,31 +1027,40 @@ function buildBackendExtractPayload(url, debugOnly, accessCode, catalogMode = fa
   return payload;
 }
 
-async function sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
-  const trimmedAccessCode = String(accessCode || "").trim();
+async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, depthOne = false) {
+  const sessionToken = String(currentSession.token || "").trim();
 
-  if (!trimmedAccessCode) {
-    throw new Error("Please enter an access code.");
+  if (!sessionToken) {
+    const error = new Error("Your session has expired. Please sign in again.");
+    error.code = "SESSION_AUTH_REQUIRED";
+    throw error;
   }
 
-  const payload = buildBackendExtractPayload(url, debugOnly, trimmedAccessCode, catalogMode, depthOne);
+  const payload = buildBackendExtractPayload(url, debugOnly, catalogMode, depthOne);
 
   const res = await fetch(EXTRACT_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${sessionToken}`,
+    },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
-
-  if (res.status === 401) {
-    throw createInvalidAccessCodeError();
-  }
 
   return res;
 }
 
 async function readBackendExtractResponse(res) {
   const data = await res.json().catch(() => null);
+
+  if (res.status === 401 || res.status === 403) {
+    const error = new Error(data?.detail || "Your session is not authorised for extraction.");
+    error.code = /password|access code/i.test(String(data?.detail || ""))
+      ? "BACKEND_LEGACY_PASSWORD_REQUIRED"
+      : "SESSION_AUTH_REQUIRED";
+    throw error;
+  }
 
   if (res.status === 422) {
     updateDebugStateFromBackend(data);
@@ -1071,8 +1079,8 @@ async function readBackendExtractResponse(res) {
   return data;
 }
 
-async function useBackendExtract(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
-  const res = await sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode, depthOne);
+async function useBackendExtract(url, debugOnly, catalogMode = false, depthOne = false) {
+  const res = await sendBackendExtractRequest(url, debugOnly, catalogMode, depthOne);
   return readBackendExtractResponse(res);
 }
 
@@ -1109,24 +1117,29 @@ function updateDebugStateFromBackend(data) {
 }
 
 // Main flow
-scrapeBtn.addEventListener("click", handleExtractClick);
-retryBtn.addEventListener("click", () => { clearError(); handleExtractClick(); });
-urlInput.addEventListener("keydown", e => { if (e.key === "Enter") handleExtractClick(); });
+scrapeBtn?.addEventListener("click", handleExtractClick);
+retryBtn?.addEventListener("click", () => { clearError(); handleExtractClick(); });
+urlInput?.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    handleExtractClick(e);
+  }
+});
 
 function handleExtractClick(event) {
   event?.preventDefault();
-  if (scrapeBtn.disabled) return;
+  if (scrapeBtn?.disabled) return;
 
   try {
-    if (!decodeSessionLooksValid(currentSession.token)) {
-      openAuthModal(handleExtractClick);
-      return;
-    }
-
     const request = prepareExtractionRequest();
     if (!request) return;
 
-    ensureAccessCodeThenRun(request);
+    if (!decodeSessionLooksValid(currentSession.token)) {
+      openAuthModal(() => runExtractionWithSession(request));
+      return;
+    }
+
+    runExtractionWithSession(request);
   } catch (error) {
     handleFrontendExtractionError(error);
   }
@@ -1165,7 +1178,7 @@ function setButtonLoading(button, isLoading, loadingText, defaultLabel = "") {
 }
 
 function prepareExtractionRequest() {
-  const url = urlInput.value.trim();
+  const url = urlInput?.value?.trim() || "";
   const debugOnly = isDebugMode();
   const catalogMode = isCatalogMode();
   const depthOne = isDepthOneEnabled();
@@ -1188,17 +1201,18 @@ function prepareExtractionRequest() {
   return { url, debugOnly, catalogMode, depthOne };
 }
 
+// Legacy access-code flow retained temporarily; not used by normal Google-auth extraction.
 function ensureAccessCodeThenRun(request) {
   const verifiedAccessCode = getVerifiedAccessCode();
   if (verifiedAccessCode) {
-    runExtractionWithAccessCode(request, verifiedAccessCode);
+    runExtractionWithSession(request);
     return;
   }
 
   openAccessCodeModal(request);
 }
 
-async function runExtractionWithAccessCode(request, accessCode) {
+async function runExtractionWithSession(request) {
   const { url, debugOnly, catalogMode, depthOne } = request;
 
   resetDebugState();
@@ -1208,7 +1222,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
   hideDebugPanel();
 
   setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
-  scrapeBtn.disabled = true;
+  if (scrapeBtn) scrapeBtn.disabled = true;
 
   let programs = [];
 
@@ -1221,26 +1235,26 @@ async function runExtractionWithAccessCode(request, accessCode) {
       if (debugOnly) console.warn("Could not start extraction progress messages.", progressError);
     }
 
-    const result = await useBackendExtract(url, debugOnly, accessCode, catalogMode, depthOne);
+    const result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
 
-    if (debugOnly) {
-      renderDebugPanel();
-      showStatus("Debug mode - content prepared. Model call skipped.", 100);
-      setStatusDetail("");
-      setTimeout(() => hideStatus(), 1500);
-      return;
-    }
-
-    if (isCatalogResponse(result)) {
+    if (catalogMode || isCatalogResponse(result)) {
       activeResultsMode = "catalog";
       programs = normalizeCatalogRows(result.catalogRows);
     } else {
       activeResultsMode = "audit";
-      programs = Array.isArray(result.programs) ? result.programs : [];
+      programs = Array.isArray(result.programmes)
+        ? result.programmes
+        : (Array.isArray(result.programs) ? result.programs : []);
     }
 
     if (!programs.length) {
-      if (shouldShowContentDiagnostics()) renderDebugPanel();
+      if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
+      if (debugOnly) {
+        showStatus("Debug response received. No result rows were returned.", 100);
+        setStatusDetail("");
+        setTimeout(() => hideStatus(), 1800);
+        return;
+      }
       const emptyMessage = activeResultsMode === "catalog"
         ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
         : "No programs were extracted. Turn on Content diagnostics to inspect what the backend received.";
@@ -1270,25 +1284,37 @@ async function runExtractionWithAccessCode(request, accessCode) {
     await sleep(250);
     hideStatus();
     renderResults(url);
-    if (shouldShowContentDiagnostics()) renderDebugPanel();
+    if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
   } catch (error) {
-    if (shouldShowContentDiagnostics()) renderDebugPanel();
-    if (isInvalidAccessCodeError(error)) {
-      handleInvalidAccessCode(request);
+    if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
+    if (error?.code === "SESSION_AUTH_REQUIRED") {
+      clearGoogleSession();
+      openAuthModal(() => runExtractionWithSession(request));
+      return;
+    }
+    if (error?.code === "BACKEND_LEGACY_PASSWORD_REQUIRED") {
+      showError("The extraction API still requires the retired access-code contract and is not yet accepting Google sessions.");
       return;
     }
     if (debugOnly) console.error("UniScrape extraction failed.", error);
     showError("Extraction failed: " + getErrorMessage(error));
   } finally {
     stopStatusSequence();
-    scrapeBtn.disabled = false;
+    if (scrapeBtn) scrapeBtn.disabled = false;
     setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   }
 }
 
+function clearGoogleSession() {
+  localStorage.removeItem("uniscrape_session_token");
+  localStorage.removeItem("uniscrape_display_name");
+  currentSession = { token: "", email: "", name: "", isAdmin: false };
+  updateAccountBadge();
+}
+
 function handleFrontendExtractionError(error) {
   stopStatusSequence();
-  scrapeBtn.disabled = false;
+  if (scrapeBtn) scrapeBtn.disabled = false;
   setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   if (isDebugMode()) console.error("UniScrape could not start extraction.", error);
   showError("Could not start extraction: " + getErrorMessage(error));
@@ -1438,7 +1464,7 @@ function handleInvalidAccessCode(request, options = {}) {
   stopStatusSequence();
   hideStatus();
   clearError();
-  scrapeBtn.disabled = false;
+  if (scrapeBtn) scrapeBtn.disabled = false;
   setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   setAccessCodeModalLoading(false);
 
@@ -1475,7 +1501,7 @@ async function submitAccessCodeModal() {
     saveAccessCode(accessCode);
     closeAccessCodeModal({ force: true });
     await nextFrame();
-    runExtractionWithAccessCode(request, accessCode);
+    runExtractionWithSession(request);
   } catch (e) {
     if (isInvalidAccessCodeError(e)) {
       handleInvalidAccessCode(request, { keepModalOpen: true });
@@ -1769,8 +1795,8 @@ async function copyMarkdownPreview() {
   }
 }
 
-function renderDebugPanel() {
-  if (!shouldShowContentDiagnostics() || !debugPanel || !debugStatsEl) return;
+function renderDebugPanel(forceVisible = false) {
+  if ((!forceVisible && !shouldShowContentDiagnostics()) || !debugPanel || !debugStatsEl) return;
 
   const rd = debugState.renderApi || {};
   const be = debugState.backend || {};
@@ -2977,9 +3003,9 @@ clearBtn.addEventListener("click", () => {
 
 //Helpers
 function showStatus(msg, pct) {
-  statusSection.classList.remove("hidden");
-  statusText.textContent   = msg;
-  progressFill.style.width = pct + "%";
+  statusSection?.classList.remove("hidden");
+  if (statusText) statusText.textContent = msg;
+  if (progressFill) progressFill.style.width = pct + "%";
 }
 function setStatusDetail(message) {
   if (!statusDetail) return;
@@ -2987,19 +3013,19 @@ function setStatusDetail(message) {
   statusDetail.classList.toggle("hidden", !message);
 }
 function hideStatus()  {
-  statusSection.classList.add("hidden");
-  progressFill.style.width = "0%";
+  statusSection?.classList.add("hidden");
+  if (progressFill) progressFill.style.width = "0%";
   setStatusDetail("");
 }
 function showError(m)  {
-  errorSection.classList.remove("hidden");
-  errorText.textContent = m;
-  retryBtn.classList.remove("hidden");
+  errorSection?.classList.remove("hidden");
+  if (errorText) errorText.textContent = m;
+  retryBtn?.classList.remove("hidden");
   hideStatus();
 }
 function clearError()  {
-  errorSection.classList.add("hidden");
-  retryBtn.classList.add("hidden");
+  errorSection?.classList.add("hidden");
+  retryBtn?.classList.add("hidden");
 }
 function showWarning(message) {
   if (!warningSection || !warningText) return;
