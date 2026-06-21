@@ -24,23 +24,12 @@ const ACCESS_CODE_VERIFY_ERROR_MESSAGE = "Could not verify access code. Please t
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 const DEFAULT_CONTENT_MODE = "auto";
 const DEPTH_ONE_REQUEST_DEFAULTS = Object.freeze({
-  detail_delay_ms: 750,
-  include_detail_markdown_debug: false,
   enrich_detail_fields: true,
   include_non_award_short_courses: false,
-  max_field_enrichment_links_per_programme: 2,
-  max_field_enrichment_chars_per_page: 12000,
   expand_detail_accordions: true,
   expand_enrichment_accordions: true,
   use_scoped_enrichment_cache: true,
-  max_field_enrichment_runtime_ms_per_programme: 10000,
-  max_runtime_ms: 90000,
-  soft_timeout_buffer_ms: 12000,
-  max_discovery_runtime_ms: 55000,
-  max_detail_runtime_ms: 45000,
   return_partial_on_timeout: true,
-  fail_fast_on_seed_timeout: false,
-  compact_debug_on_partial: true,
 });
 
 // State
@@ -931,6 +920,7 @@ if (downloadFinalMdBtn) downloadFinalMdBtn.addEventListener("click", () => downl
 if (copyMarkdownBtn) copyMarkdownBtn.addEventListener("click", copyMarkdownPreview);
 
 let statusSequenceTimer = null;
+let lastStatusProgress = 0;
 
 function startStatusSequence(messages, intervalMs = 3500) {
   stopStatusSequence();
@@ -940,14 +930,17 @@ function startStatusSequence(messages, intervalMs = 3500) {
   }
 
   let index = 0;
-  showStatus(messages[index].text, messages[index].progress);
+  let lastProgress = Math.max(0, Number(messages[index].progress) || 0);
+  lastStatusProgress = 0;
+  showStatus(messages[index].text, lastProgress);
 
   statusSequenceTimer = setInterval(() => {
-    index += 1;
-    if (index >= messages.length) {
-      index = Math.max(0, messages.length - 4);
+    if (index < messages.length - 1) {
+      index += 1;
     }
-    showStatus(messages[index].text, messages[index].progress);
+
+    lastProgress = Math.max(lastProgress, Number(messages[index].progress) || 0);
+    showStatus(messages[index].text, lastProgress);
   }, intervalMs);
 }
 
@@ -1253,26 +1246,36 @@ async function runExtractionWithSession(request) {
 
     if (!programs.length) {
       if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
-      if (debugOnly) {
-        showStatus("Debug response received. No result rows were returned.", 100);
-        setStatusDetail("");
-        setTimeout(() => hideStatus(), 1800);
-        return;
-      }
-      const emptyMessage = activeResultsMode === "catalog"
-        ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
-        : "No programs were extracted. Turn on Content diagnostics to inspect what the backend received.";
+      const diagnostics = getResponseDiagnostics(result);
+      const candidatesFound = Math.max(
+        Number(diagnostics.candidateCount || 0),
+        Number(result?.discoveredProgrammeCount || 0),
+        Array.isArray(result?.programmeCandidates) ? result.programmeCandidates.length : 0,
+      );
+      const emptyMessage = depthOne
+        ? (
+            candidatesFound > 0
+              ? "Programme candidates were found, but no final rows were returned. Check Content diagnostics for detail/fallback status."
+              : "Depth-1 extraction did not produce final rows."
+          )
+        : (
+            candidatesFound > 0
+              ? "No final rows were extracted from the listing page. Candidate links were found, but normal extraction returned no rows."
+              : activeResultsMode === "catalog"
+                ? "No catalog rows were extracted from the listing page."
+                : "No programs were extracted from the listing page."
+          );
       return showError(emptyMessage);
     }
 
     if (isPartialResponse(result)) {
       showWarning(depthOne
-        ? "Depth-1 returned a partial result. You can still review/export the extracted rows."
+        ? "Partial Depth-1 result returned. Some detail pages used fallback listing data, but usable rows were extracted."
         : "Partial result returned. Some detail pages may have failed or timed out, but usable data was extracted.");
     }
 
     stopStatusSequence();
-    showStatus("Mapping subjects...", 82);
+    showStatus("Preparing results...", 90);
 
     if (activeResultsMode !== "catalog") {
       programs = programs.map(p => {
@@ -1282,13 +1285,15 @@ async function runExtractionWithSession(request) {
       });
     }
 
-    showStatus("Rendering results...", 96);
+    showStatus("Building table output...", 96);
     allPrograms = programs;
 
     await sleep(250);
-    hideStatus();
     renderResults(url);
     if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
+    showStatus("Finalising diagnostics...", 100);
+    await sleep(100);
+    hideStatus();
   } catch (error) {
     if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
     if (error?.code === "SESSION_AUTH_REQUIRED") {
@@ -1360,14 +1365,11 @@ function buildExtractionStatusSequence(depthOne) {
     "Parsing model response...",
     "Recovering JSON if needed...",
     "Validating rows...",
-    "Preparing results...",
-    "Building table output...",
-    "Finalising diagnostics...",
   );
 
   return phrases.map((text, index) => ({
     text,
-    progress: Math.min(92, Math.round(8 + (index / Math.max(1, phrases.length - 1)) * 84)),
+    progress: Math.min(84, Math.round(8 + (index / Math.max(1, phrases.length - 1)) * 76)),
   }));
 }
 
@@ -1379,6 +1381,20 @@ function getResponseDiagnostics(data) {
   const frontend = data?.frontendDiagnostics || {};
   const diagnostics = data?.diagnostics || {};
   return {
+    extractDetailsRequested:
+      frontend.extractDetailsRequested ?? diagnostics.extractDetailsRequested,
+    normalExtractionAttempted:
+      frontend.normalExtractionAttempted ?? diagnostics.normalExtractionAttempted,
+    normalExtractionSucceeded:
+      frontend.normalExtractionSucceeded ?? diagnostics.normalExtractionSucceeded,
+    candidateDiscoveryAttempted:
+      frontend.candidateDiscoveryAttempted ?? diagnostics.candidateDiscoveryAttempted,
+    candidateDiscoveryOnly:
+      frontend.candidateDiscoveryOnly ?? diagnostics.candidateDiscoveryOnly,
+    detailExtractionAttempted:
+      frontend.detailExtractionAttempted ?? diagnostics.detailExtractionAttempted,
+    finalOutputSource:
+      frontend.finalOutputSource ?? diagnostics.finalOutputSource,
     candidateCount: frontend.candidateCount ?? diagnostics.programmeCandidateCount,
     finalCandidateCount: frontend.finalCandidateCount ?? diagnostics.finalCandidateCount,
     detailsAttempted: frontend.detailsAttempted ?? diagnostics.detailPagesAttempted,
@@ -1386,6 +1402,7 @@ function getResponseDiagnostics(data) {
     detailsFailed: frontend.detailsFailed ?? diagnostics.detailPagesFailed,
     detailsSkipped: frontend.detailsSkipped ?? diagnostics.detailPagesSkipped,
     shortCoursesRejected: frontend.shortCoursesRejected ?? diagnostics.nonAwardShortCourseRejectedCount,
+    depthOneStatus: frontend.depthOneStatus ?? diagnostics.depthOneStatus,
     depthOneReady: frontend.depthOneReady ?? diagnostics.depthOneReady,
     partial: frontend.partial ?? data?.partial,
     completionWasAffectedByRuntime:
@@ -1808,6 +1825,11 @@ function renderDebugPanel(forceVisible = false) {
   const markdown = debugState.finalExtractionMarkdown || debugState.markdown || "";
   const diagnostics = be.diagnostics || {};
   const diagnosticRows = [
+    ["Normal extraction attempted", formatYesNo(diagnostics.normalExtractionAttempted)],
+    ["Normal extraction succeeded", formatYesNo(diagnostics.normalExtractionSucceeded)],
+    ["Candidate discovery attempted", formatYesNo(diagnostics.candidateDiscoveryAttempted)],
+    ["Detail extraction attempted", formatYesNo(diagnostics.detailExtractionAttempted)],
+    ["Final output source", diagnostics.finalOutputSource],
     ["Candidates found", diagnostics.candidateCount],
     ["Final candidates", diagnostics.finalCandidateCount],
     ["Details attempted", diagnostics.detailsAttempted],
@@ -1815,7 +1837,7 @@ function renderDebugPanel(forceVisible = false) {
     ["Details failed", diagnostics.detailsFailed],
     ["Details skipped", diagnostics.detailsSkipped],
     ["Short courses rejected", diagnostics.shortCoursesRejected],
-    ["Depth-1 status", formatDiagnosticValue(diagnostics.depthOneReady)],
+    ["Depth-1 status", diagnostics.depthOneStatus || "not_requested"],
     ["Partial result", formatYesNo(diagnostics.partial)],
     ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
@@ -2554,11 +2576,51 @@ function normalizeCatalogRows(rows) {
     credits: row?.credits || "",
     creditsUnit: row?.creditsUnit || "",
     duration: row?.duration || "",
-    fees: row?.fees || "",
+    fees: formatCatalogFeeDisplay(row?.fees),
     location: row?.location || "",
     language: row?.language || "",
     modeOfStudy: row?.modeOfStudy || "",
   }));
+}
+
+function formatCatalogFeeDisplay(value) {
+  const original = String(value ?? "").replace(/\u00a0/g, " ").trim();
+  if (!original) return "";
+
+  const amount = String.raw`(?:\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d{1,2})?`;
+  const codes = String.raw`(?:GBP|USD|EUR|AUD|CAD|NZD|SGD|HKD|MYR|RM|AED|SAR|INR|JPY|CNY|RMB|CHF|ZAR)`;
+  const symbols = String.raw`(?:(?:US|AU|A|CA|C|NZ|SG|S|HK)?[$£€¥₹])`;
+  const feePattern = new RegExp(
+    String.raw`(?:Â?${symbols}\s*${amount}|\b${codes}\s*${amount}\b|\b${amount}\s*${codes}\b)`,
+    "gi",
+  );
+  const matches = original.match(feePattern) || [];
+  const seen = new Set();
+  const values = [];
+
+  matches.forEach(match => {
+    let cleaned = match.replace(/^Â/, "").replace(/\s+/g, " ").trim();
+    cleaned = cleaned.replace(
+      new RegExp(String.raw`^(${codes})\s*`, "i"),
+      (_, code) => `${code.toUpperCase()} `,
+    );
+    cleaned = cleaned.replace(
+      new RegExp(String.raw`^(${symbols})\s*`, "i"),
+      (_, symbol) => symbol,
+    );
+    cleaned = cleaned.replace(
+      new RegExp(String.raw`\s*(${codes})$`, "i"),
+      (_, code) => ` ${code.toUpperCase()}`,
+    );
+
+    const key = cleaned.toUpperCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      values.push(cleaned);
+    }
+  });
+
+  return values.length ? values.join(" / ") : original;
 }
 
 function isCatalogResults() {
@@ -3009,7 +3071,11 @@ clearBtn.addEventListener("click", () => {
 function showStatus(msg, pct) {
   statusSection?.classList.remove("hidden");
   if (statusText) statusText.textContent = msg;
-  if (progressFill) progressFill.style.width = pct + "%";
+  const nextProgress = Number(pct);
+  if (Number.isFinite(nextProgress)) {
+    lastStatusProgress = Math.max(lastStatusProgress, nextProgress);
+  }
+  if (progressFill) progressFill.style.width = lastStatusProgress + "%";
 }
 function setStatusDetail(message) {
   if (!statusDetail) return;
@@ -3019,6 +3085,7 @@ function setStatusDetail(message) {
 function hideStatus()  {
   statusSection?.classList.add("hidden");
   if (progressFill) progressFill.style.width = "0%";
+  lastStatusProgress = 0;
   setStatusDetail("");
 }
 function showError(m)  {
