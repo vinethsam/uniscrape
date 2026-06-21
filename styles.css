@@ -1259,19 +1259,10 @@ td.name-cell { max-width: 210px; font-weight: 500; }
   width: 100%;
 }
 
-.google-btn-stack {
-  position: relative;
+.static-google-btn {
   width: 100%;
   height: 42px;
   margin-top: 0.5rem;
-}
-
-.static-google-btn {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1280,64 +1271,24 @@ td.name-cell { max-width: 210px; font-weight: 500; }
   color: #1f1f1f;
   border: 1px solid var(--border, #2a2a2a);
   border-radius: 999px;
-  font-family: var(--font);
+  font-family: "JetBrains Mono", monospace;
   font-size: 0.85rem;
   font-weight: 500;
-  cursor: default;
+  cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
-  opacity: 0.6;
-  pointer-events: none;
-  z-index: 1;
 }
 
-.btn-label-ready {
-  display: none;
-}
-
-.btn-label-loading {
-  display: inline;
-}
-
-.google-btn-stack.btn-ready .btn-label-ready {
-  display: inline;
-}
-
-.google-btn-stack.btn-ready .btn-label-loading {
-  display: none;
-}
-
-.google-btn-stack.btn-ready:hover .static-google-btn {
+.static-google-btn:hover {
   background: #f4f4f4;
 }
 
-.google-btn-stack.btn-ready:active .static-google-btn {
+.static-google-btn:active {
   transform: scale(0.98);
 }
 
-.google-btn-stack.btn-ready .static-google-btn {
-  opacity: 1;
-  cursor: pointer;
-}
-
-.google-btn-real {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  z-index: 2;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.google-btn-stack.btn-ready .google-btn-real {
-  pointer-events: auto;
-}
-
-.google-btn-real iframe {
-  width: 100% !important;
-  height: 100% !important;
+.static-google-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 #teamAccessModal .modal-box {

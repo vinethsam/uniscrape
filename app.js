@@ -43,6 +43,7 @@ let currentSession = {
 let pendingGoogleIdToken = "";
 let pendingPollInterval = null;
 let pendingScrapeAction = null;
+let googleIdentityInitialized = false;
 
 let debugState = {
   rawHtml: "",
@@ -308,25 +309,18 @@ function renderAuthModalState(state) {
     authModalBody.innerHTML = `
       <p class="field-hint">Sign in to use UniScrape.</p>
       <input type="text" id="preSignInNameInput" class="text-input" placeholder="Your name, e.g. Timothy" maxlength="80" value="${esc(cachedName)}" />
-      <div id="googleBtnStack" class="google-btn-stack">
-        <button type="button" id="staticGoogleBtn" class="static-google-btn">
-          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91A8.78 8.78 0 0 0 17.64 9.2z"/>
-            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.81.54-1.85.86-3.05.86-2.34 0-4.33-1.58-5.04-3.71H.96v2.33A9 9 0 0 0 9 18z"/>
-            <path fill="#FBBC05" d="M3.96 10.71A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.17.29-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3-2.33z"/>
-            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A8.59 8.59 0 0 0 9 0a9 9 0 0 0-8.04 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"/>
-          </svg>
-          <span class="btn-label-loading">Loading...</span>
-          <span class="btn-label-ready">Sign in with Google</span>
-        </button>
-        <div id="googleSignInBtn" class="google-btn-real"></div>
-      </div>
+      <button type="button" id="staticGoogleBtn" class="static-google-btn">
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+          <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91A8.78 8.78 0 0 0 17.64 9.2z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.81.54-1.85.86-3.05.86-2.34 0-4.33-1.58-5.04-3.71H.96v2.33A9 9 0 0 0 9 18z"/>
+          <path fill="#FBBC05" d="M3.96 10.71A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.17.29-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3-2.33z"/>
+          <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A8.59 8.59 0 0 0 9 0a9 9 0 0 0-8.04 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"/>
+        </svg>
+        <span>Sign in with Google</span>
+      </button>
     `;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        renderGoogleButton();
-      });
-    });
+    initGoogleIdentity();
+    document.getElementById("staticGoogleBtn")?.addEventListener("click", handleStaticGoogleClick);
     return;
   }
 
@@ -354,68 +348,53 @@ function renderAuthModalState(state) {
   }
 }
 
-function renderGoogleButton(retryCount = 0) {
+function initGoogleIdentity() {
   if (!window.google || !window.google.accounts) {
-    setTimeout(renderGoogleButton, 300);
+    setTimeout(initGoogleIdentity, 300);
     return;
   }
-
-  const container = document.getElementById("googleSignInBtn");
-  const staticBtn = document.getElementById("staticGoogleBtn");
-  const stack = document.getElementById("googleBtnStack");
-  if (!container || !staticBtn || !stack) return;
-
-  container.innerHTML = "";
-  stack.classList.remove("btn-ready");
+  if (googleIdentityInitialized) return;
 
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleGoogleSignIn,
     use_fedcm_for_prompt: true,
   });
+  googleIdentityInitialized = true;
+}
 
-  const markReadyIfPresent = () => {
-    const iframe = container.querySelector("iframe");
-    if (!iframe) return false;
-    stack.classList.add("btn-ready");
-    observer.disconnect();
-    return true;
-  };
+function handleStaticGoogleClick() {
+  const btn = document.getElementById("staticGoogleBtn");
+  if (!btn) return;
 
-  const observer = new MutationObserver(() => {
-    markReadyIfPresent();
+  if (!googleIdentityInitialized || !window.google?.accounts?.id) {
+    initGoogleIdentity();
+    showError("Google sign-in is still loading. Please try again in a moment.");
+    return;
+  }
+
+  const label = btn.querySelector("span");
+  btn.disabled = true;
+  if (label) label.textContent = "Opening Google...";
+
+  google.accounts.id.prompt((notification) => {
+    btn.disabled = false;
+    if (label) label.textContent = "Sign in with Google";
+
+    const wasNotDisplayed = notification.isNotDisplayed?.() || false;
+    const wasSkipped = notification.isSkippedMoment?.() || false;
+    if (wasNotDisplayed || wasSkipped) {
+      const reason = (
+        notification.getNotDisplayedReason?.()
+        || notification.getSkippedReason?.()
+        || "unknown reason"
+      );
+      console.warn("[auth] Google prompt did not display:", reason);
+      showError(
+        "Google sign-in could not open. Please check that third-party cookies/popups are allowed for this site, then try again."
+      );
+    }
   });
-  observer.observe(container, { childList: true, subtree: true });
-
-  google.accounts.id.renderButton(
-    container,
-    {
-      theme: "filled_black",
-      size: "large",
-      shape: "pill",
-      text: "signin_with",
-      width: 280,
-    }
-  );
-
-  // renderButton may insert synchronously, before the observer callback runs.
-  markReadyIfPresent();
-
-  setTimeout(() => {
-    const isCurrentContainer = (
-      container.isConnected
-      && document.getElementById("googleSignInBtn") === container
-    );
-    if (!isCurrentContainer || markReadyIfPresent()) return;
-
-    observer.disconnect();
-    if (retryCount === 0) {
-      console.warn("[auth] Google iframe never appeared, retrying render.");
-      renderGoogleButton(1);
-    } else {
-      console.warn("[auth] Google iframe never appeared after retry.");
-    }
-  }, 4000);
 }
 
 async function handleGoogleSignIn(response) {
