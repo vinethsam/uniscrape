@@ -374,6 +374,18 @@ header {
 }
 .settings-row-toggle { cursor: pointer; }
 .settings-row-column { align-items: stretch; flex-direction: column; gap: .38rem; }
+.settings-toggle-copy {
+  display: flex;
+  flex-direction: column;
+  gap: .18rem;
+  min-width: 0;
+}
+.settings-helper {
+  max-width: 190px;
+  color: var(--faint);
+  font-size: .62rem;
+  line-height: 1.35;
+}
 
 .settings-nav-link {
   min-height: 2.25rem;
@@ -960,6 +972,12 @@ body.route-extractor #databasesPage,
   font-size: .76rem;
   color: var(--muted);
 }
+.status-detail {
+  display: block;
+  margin-top: .2rem;
+  color: var(--faint);
+  font-size: .66rem;
+}
 .spinner {
   width: 9px; height: 9px;
   border: 1.5px solid rgba(255,255,255,0.10);
@@ -999,6 +1017,28 @@ body.route-extractor #databasesPage,
 .error-body { display: flex; flex-direction: column; gap: .72rem; flex: 1; min-width: 0; }
 .error-retry-btn { align-self: flex-start; }
 .error-label {
+  font-weight: 600;
+  letter-spacing: .10em;
+  white-space: nowrap;
+  font-size: .65rem;
+  padding-top: .04rem;
+  opacity: .75;
+}
+
+.warning-box {
+  display: flex;
+  gap: .72rem;
+  align-items: flex-start;
+  background: rgba(220,190,90,0.055);
+  border: 1px solid rgba(220,190,90,0.24);
+  border-radius: var(--r-lg);
+  padding: .82rem .96rem;
+  font-size: .76rem;
+  color: var(--yellow);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.warning-label {
   font-weight: 600;
   letter-spacing: .10em;
   white-space: nowrap;

@@ -95,6 +95,17 @@
             </span>
           </label>
 
+          <label class="settings-row settings-row-toggle">
+            <span class="settings-toggle-copy">
+              <span>Depth-1 extraction</span>
+              <span class="settings-helper">Extracts details from selected programme pages. Slower, but richer.</span>
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="depthOneToggle" />
+              <span class="slider" aria-hidden="true"></span>
+            </span>
+          </label>
+
           <div class="settings-row settings-row-column">
             <div id="contentModeLabel" class="field-label">Content body</div>
             <div class="radio-inputs content-mode-radios" role="radiogroup" aria-labelledby="contentModeLabel">
@@ -126,7 +137,10 @@
     <section id="statusSection" class="panel status-panel hidden">
       <div class="status-row">
         <span class="spinner"></span>
-        <span id="statusText">Working...</span>
+        <span>
+          <span id="statusText">Working...</span>
+          <span id="statusDetail" class="status-detail hidden"></span>
+        </span>
       </div>
       <div class="progress-track">
         <div id="progressFill" class="progress-fill"></div>
@@ -141,6 +155,13 @@
           <span id="errorText"></span>
           <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
         </div>
+      </div>
+    </section>
+
+    <section id="warningSection" class="hidden">
+      <div class="warning-box">
+        <span class="warning-label">NOTICE</span>
+        <span id="warningText"></span>
       </div>
     </section>
 

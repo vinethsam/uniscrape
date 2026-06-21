@@ -23,11 +23,34 @@ const INVALID_ACCESS_CODE_MESSAGE = "Invalid access code.";
 const ACCESS_CODE_VERIFY_ERROR_MESSAGE = "Could not verify access code. Please try again.";
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 const DEFAULT_CONTENT_MODE = "auto";
+const DEPTH_ONE_REQUEST_DEFAULTS = Object.freeze({
+  max_detail_pages: 10,
+  detail_delay_ms: 750,
+  include_detail_markdown_debug: false,
+  enrich_detail_fields: true,
+  include_non_award_short_courses: false,
+  max_field_enrichment_links_per_programme: 2,
+  max_total_field_enrichment_pages: 10,
+  max_field_enrichment_chars_per_page: 12000,
+  expand_detail_accordions: true,
+  expand_enrichment_accordions: true,
+  use_scoped_enrichment_cache: true,
+  max_field_enrichment_runtime_ms_per_programme: 10000,
+  max_runtime_ms: 90000,
+  soft_timeout_buffer_ms: 12000,
+  max_discovery_runtime_ms: 55000,
+  max_detail_runtime_ms: 45000,
+  max_model_calls_per_request: 10,
+  return_partial_on_timeout: true,
+  fail_fast_on_seed_timeout: false,
+  compact_debug_on_partial: true,
+});
 
 // State
 let allPrograms = [];
 let activeResultsMode = "audit";
 let catalogModeEnabled = false;
+let depthOneEnabled = false;
 let contentDiagnosticsEnabled = false;
 let sortCol = null;
 let sortDir = 1;
@@ -78,6 +101,8 @@ let debugState = {
     markdownCharsAfterPreparser: 0,
     modelUsed: "",
     source: "",
+    diagnostics: {},
+    partial: false,
   },
 };
 
@@ -87,10 +112,13 @@ const apiHint          = document.getElementById("apiHint");
 const scrapeBtn        = document.getElementById("scrapeBtn");
 const statusSection    = document.getElementById("statusSection");
 const statusText       = document.getElementById("statusText");
+const statusDetail     = document.getElementById("statusDetail");
 const progressFill     = document.getElementById("progressFill");
 const errorSection     = document.getElementById("errorSection");
 const errorText        = document.getElementById("errorText");
 const retryBtn         = document.getElementById("retryBtn");
+const warningSection   = document.getElementById("warningSection");
+const warningText      = document.getElementById("warningText");
 const resultsSection   = document.getElementById("resultsSection");
 const tableBody        = document.getElementById("tableBody");
 const resultCount      = document.getElementById("resultCount");
@@ -117,6 +145,7 @@ const settingsMenuButton = document.querySelector(".settings-menu-button");
 const settingsPanel = document.getElementById("settingsPanel");
 const pageBackdrop = document.getElementById("pageBackdrop");
 const catalogToggleInput = document.getElementById("catalogToggle");
+const depthOneToggleInput = document.getElementById("depthOneToggle");
 const debugPanel       = document.getElementById("debugPanel");
 const debugStatsEl     = document.getElementById("debugStats");
 const debugWarningsEl  = document.getElementById("debugWarnings");
@@ -878,6 +907,12 @@ if (catalogToggleInput) {
     catalogModeEnabled = catalogToggleInput.checked;
   });
 }
+if (depthOneToggleInput) {
+  depthOneToggleInput.checked = false;
+  depthOneToggleInput.addEventListener("change", () => {
+    depthOneEnabled = depthOneToggleInput.checked;
+  });
+}
 if (contentModeInputs.length) {
   setSelectedContentMode(localStorage.getItem("uniscrape_content_mode") || DEFAULT_CONTENT_MODE);
   contentModeInputs.forEach(input => {
@@ -911,12 +946,11 @@ function startStatusSequence(messages, intervalMs = 3500) {
   showStatus(messages[index].text, messages[index].progress);
 
   statusSequenceTimer = setInterval(() => {
-    index = Math.min(index + 1, messages.length - 1);
-    showStatus(messages[index].text, messages[index].progress);
-
-    if (index >= messages.length - 1) {
-      stopStatusSequence();
+    index += 1;
+    if (index >= messages.length) {
+      index = Math.max(0, messages.length - 4);
     }
+    showStatus(messages[index].text, messages[index].progress);
   }, intervalMs);
 }
 
@@ -975,22 +1009,33 @@ async function verifyAccessCode(accessCode) {
   return data;
 }
 
-async function sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode = false) {
+function buildBackendExtractPayload(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
+  const payload = {
+    url,
+    password: accessCode,
+    debug: debugOnly,
+    extract_details: Boolean(depthOne),
+  };
+
+  if (catalogMode) {
+    payload.extractionMode = "catalog";
+  }
+
+  if (depthOne) {
+    Object.assign(payload, DEPTH_ONE_REQUEST_DEFAULTS);
+  }
+
+  return payload;
+}
+
+async function sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
   const trimmedAccessCode = String(accessCode || "").trim();
 
   if (!trimmedAccessCode) {
     throw new Error("Please enter an access code.");
   }
 
-  const payload = {
-    url,
-    password: trimmedAccessCode,
-    debug: debugOnly,
-  };
-
-  if (catalogMode) {
-    payload.extractionMode = "catalog";
-  }
+  const payload = buildBackendExtractPayload(url, debugOnly, trimmedAccessCode, catalogMode, depthOne);
 
   const res = await fetch(EXTRACT_API_URL, {
     method: "POST",
@@ -1026,8 +1071,8 @@ async function readBackendExtractResponse(res) {
   return data;
 }
 
-async function useBackendExtract(url, debugOnly, accessCode, catalogMode = false) {
-  const res = await sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode);
+async function useBackendExtract(url, debugOnly, accessCode, catalogMode = false, depthOne = false) {
+  const res = await sendBackendExtractRequest(url, debugOnly, accessCode, catalogMode, depthOne);
   return readBackendExtractResponse(res);
 }
 
@@ -1056,6 +1101,8 @@ function updateDebugStateFromBackend(data) {
   debugState.backend.markdownCharsAfterPreparser = Number(data.markdownCharsAfterPreparser || 0);
   debugState.backend.modelUsed = data.modelUsed || "";
   debugState.backend.source = data.source || "backend";
+  debugState.backend.diagnostics = getResponseDiagnostics(data);
+  debugState.backend.partial = Boolean(data.frontendDiagnostics?.partial ?? data.partial);
 
   debugState.apiDiscovery.finalSource = data.source || "backend";
   debugState.renderApi.finalSource = data.source || "backend";
@@ -1114,9 +1161,11 @@ function prepareExtractionRequest() {
   const url = urlInput.value.trim();
   const debugOnly = isDebugMode();
   const catalogMode = isCatalogMode();
+  const depthOne = isDepthOneEnabled();
 
   resetDebugState();
   clearError();
+  clearWarning();
   hideResults();
   hideDebugPanel();
 
@@ -1129,7 +1178,7 @@ function prepareExtractionRequest() {
     return null;
   }
 
-  return { url, debugOnly, catalogMode };
+  return { url, debugOnly, catalogMode, depthOne };
 }
 
 function ensureAccessCodeThenRun(request) {
@@ -1143,29 +1192,23 @@ function ensureAccessCodeThenRun(request) {
 }
 
 async function runExtractionWithAccessCode(request, accessCode) {
-  const { url, debugOnly, catalogMode } = request;
+  const { url, debugOnly, catalogMode, depthOne } = request;
 
   resetDebugState();
   clearError();
+  clearWarning();
   hideResults();
   hideDebugPanel();
 
   setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
   scrapeBtn.disabled = true;
-  startStatusSequence([
-    { text: "Connecting to UniScrape backend...", progress: 12 },
-    { text: "Rendering page with Playwright...", progress: 24 },
-    { text: "Capturing stable page content...", progress: 36 },
-    { text: "Filtering noisy scripts and assets...", progress: 48 },
-    { text: "Building extraction markdown...", progress: 60 },
-    { text: "Sending content to the model...", progress: 72 },
-    { text: "Parsing structured JSON response...", progress: 84 },
-  ]);
+  setStatusDetail(depthOne ? "Depth-1 extraction enabled — this may take a few minutes for larger sites." : "");
+  startStatusSequence(buildExtractionStatusSequence(depthOne), 3000);
 
   let programs = [];
 
   try {
-    const result = await useBackendExtract(url, debugOnly, accessCode, catalogMode);
+    const result = await useBackendExtract(url, debugOnly, accessCode, catalogMode, depthOne);
 
     if (debugOnly) {
       stopStatusSequence();
@@ -1173,6 +1216,7 @@ async function runExtractionWithAccessCode(request, accessCode) {
       scrapeBtn.disabled = false;
       setButtonLoading(scrapeBtn, false, "", "Extract Programs");
       showStatus("Debug mode - content prepared. Model call skipped.", 100);
+      setStatusDetail("");
       setTimeout(() => hideStatus(), 1500);
       return;
     }
@@ -1194,6 +1238,12 @@ async function runExtractionWithAccessCode(request, accessCode) {
         ? "No catalog rows were extracted. Turn on Content diagnostics to inspect what the backend received."
         : "No programs were extracted. Turn on Content diagnostics to inspect what the backend received.";
       return showError(emptyMessage);
+    }
+
+    if (isPartialResponse(result)) {
+      showWarning(depthOne
+        ? "Depth-1 returned a partial result. You can still review/export the extracted rows."
+        : "Partial result returned. Some detail pages may have failed or timed out, but usable data was extracted.");
     }
   } catch (e) {
     stopStatusSequence();
@@ -1227,6 +1277,69 @@ async function runExtractionWithAccessCode(request, accessCode) {
   if (shouldShowContentDiagnostics()) renderDebugPanel();
   scrapeBtn.disabled = false;
   setButtonLoading(scrapeBtn, false, "", "Extract Programs");
+}
+
+function buildExtractionStatusSequence(depthOne) {
+  const phrases = [
+    "Connecting to UniScrape backend...",
+    "Starting crawl request...",
+    "Preparing extraction settings...",
+    "Rendering the seed page...",
+    "Scanning links and page structure...",
+    "Looking for programme candidates...",
+    "Checking captured APIs and embedded page data...",
+    "Filtering support, event, and marketing pages...",
+  ];
+
+  if (depthOne) {
+    phrases.push(
+      "Depth-1 enabled: preparing detail pages...",
+      "Opening selected programme pages...",
+      "Expanding course detail sections...",
+      "Extracting fees, duration, location, and study mode...",
+      "Reading entry requirements and English requirements...",
+      "Checking for shared fees or admissions pages...",
+      "Filtering non-award short courses...",
+      "Merging detail-page fields...",
+    );
+  }
+
+  phrases.push(
+    "Structuring extracted programme data...",
+    "Parsing model response...",
+    "Recovering JSON if needed...",
+    "Validating rows...",
+    "Preparing results...",
+    "Building table output...",
+    "Finalising diagnostics...",
+  );
+
+  return phrases.map((text, index) => ({
+    text,
+    progress: Math.min(92, Math.round(8 + (index / Math.max(1, phrases.length - 1)) * 84)),
+  }));
+}
+
+function isPartialResponse(result) {
+  return Boolean(result?.frontendDiagnostics?.partial ?? result?.partial);
+}
+
+function getResponseDiagnostics(data) {
+  const frontend = data?.frontendDiagnostics || {};
+  const diagnostics = data?.diagnostics || {};
+  return {
+    candidateCount: frontend.candidateCount ?? diagnostics.programmeCandidateCount,
+    finalCandidateCount: frontend.finalCandidateCount ?? diagnostics.finalCandidateCount,
+    detailsAttempted: frontend.detailsAttempted ?? diagnostics.detailPagesAttempted,
+    detailsSucceeded: frontend.detailsSucceeded ?? diagnostics.detailPagesSucceeded,
+    detailsFailed: frontend.detailsFailed ?? diagnostics.detailPagesFailed,
+    detailsSkipped: frontend.detailsSkipped ?? diagnostics.detailPagesSkipped,
+    shortCoursesRejected: frontend.shortCoursesRejected ?? diagnostics.nonAwardShortCourseRejectedCount,
+    depthOneReady: frontend.depthOneReady ?? diagnostics.depthOneReady,
+    partial: frontend.partial ?? data?.partial,
+    completionWasAffectedByRuntime:
+      frontend.completionWasAffectedByRuntime ?? diagnostics.completionWasAffectedByRuntime,
+  };
 }
 
 function openAccessCodeModal(request, options = {}) {
@@ -1424,6 +1537,8 @@ function resetDebugState() {
     markdownCharsAfterPreparser: 0,
     modelUsed: "",
     source: "",
+    diagnostics: {},
+    partial: false,
   };
 }
 
@@ -1582,6 +1697,11 @@ function isCatalogMode() {
   return catalogModeEnabled;
 }
 
+function isDepthOneEnabled() {
+  depthOneEnabled = Boolean(depthOneToggleInput?.checked);
+  return depthOneEnabled;
+}
+
 function shouldShowContentDiagnostics() {
   contentDiagnosticsEnabled = Boolean(contentDiagnosticsToggleInput?.checked);
   return contentDiagnosticsEnabled;
@@ -1635,8 +1755,23 @@ function renderDebugPanel() {
   const be = debugState.backend || {};
   const stats = rd.stats || {};
   const markdown = debugState.finalExtractionMarkdown || debugState.markdown || "";
+  const diagnostics = be.diagnostics || {};
+  const diagnosticRows = [
+    ["Candidates found", diagnostics.candidateCount],
+    ["Final candidates", diagnostics.finalCandidateCount],
+    ["Details attempted", diagnostics.detailsAttempted],
+    ["Details succeeded", diagnostics.detailsSucceeded],
+    ["Details failed", diagnostics.detailsFailed],
+    ["Details skipped", diagnostics.detailsSkipped],
+    ["Short courses rejected", diagnostics.shortCoursesRejected],
+    ["Depth-1 status", formatDiagnosticValue(diagnostics.depthOneReady)],
+    ["Partial result", formatYesNo(diagnostics.partial)],
+    ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
 
   debugStatsEl.innerHTML = [
+    ...diagnosticRows.map(([label, value]) =>
+      `<div><span class="debug-k">${esc(label)}</span> ${esc(value)}</div>`),
     `<div><span class="debug-k">Final extraction markdown</span> ${markdown.length.toLocaleString()} chars</div>`,
     `<div><span class="debug-k">Backend page type</span> ${esc(be.pageType || "unknown")}</div>`,
     `<div><span class="debug-k">Backend preparser ran</span> ${be.preparserRan ? "yes" : "no"}</div>`,
@@ -1675,6 +1810,16 @@ function renderDebugPanel() {
   downloadFinalMdBtn?.classList.toggle("hidden", !markdown);
 
   debugPanel.classList.remove("hidden");
+}
+
+function formatYesNo(value) {
+  if (value === undefined || value === null) return "";
+  return value ? "yes" : "no";
+}
+
+function formatDiagnosticValue(value) {
+  if (typeof value === "boolean") return value ? "ready" : "not ready";
+  return value ?? "";
 }
 
 function hideDebugPanel() {
@@ -2804,6 +2949,7 @@ clearBtn.addEventListener("click", () => {
   noResults.textContent = "No programs match your filters.";
   hideResults();
   clearError();
+  clearWarning();
   hideDebugPanel();
   [filterName, filterLevel, filterBroad, filterMode, filterScholarship, filterDept].forEach(el => el.value = "");
 });
@@ -2814,7 +2960,16 @@ function showStatus(msg, pct) {
   statusText.textContent   = msg;
   progressFill.style.width = pct + "%";
 }
-function hideStatus()  { statusSection.classList.add("hidden"); progressFill.style.width = "0%"; }
+function setStatusDetail(message) {
+  if (!statusDetail) return;
+  statusDetail.textContent = message || "";
+  statusDetail.classList.toggle("hidden", !message);
+}
+function hideStatus()  {
+  statusSection.classList.add("hidden");
+  progressFill.style.width = "0%";
+  setStatusDetail("");
+}
 function showError(m)  {
   errorSection.classList.remove("hidden");
   errorText.textContent = m;
@@ -2824,6 +2979,15 @@ function showError(m)  {
 function clearError()  {
   errorSection.classList.add("hidden");
   retryBtn.classList.add("hidden");
+}
+function showWarning(message) {
+  if (!warningSection || !warningText) return;
+  warningText.textContent = message;
+  warningSection.classList.remove("hidden");
+}
+function clearWarning() {
+  warningSection?.classList.add("hidden");
+  if (warningText) warningText.textContent = "";
 }
 function hideResults() { resultsSection.classList.add("hidden"); }
 function sleep(ms)     { return new Promise(r => setTimeout(r, ms)); }
