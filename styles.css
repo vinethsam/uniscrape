@@ -751,6 +751,23 @@ body.route-extractor #databasesPage,
 }
 .field-note  { font-size: .65rem; color: var(--muted); text-transform: none; letter-spacing: 0; }
 .field-hint  { font-size: .68rem; color: var(--faint); margin-top: .1rem; letter-spacing: .01em; }
+.append-status {
+  color: var(--green);
+  font-size: .68rem;
+  line-height: 1.45;
+  margin-top: .08rem;
+}
+
+.panel-input.append-input-highlight {
+  transform: translateY(-2px);
+  border-color: var(--border-focus);
+  box-shadow:
+    0 28px 64px rgba(0,0,0,0.65),
+    0 8px 24px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(255,255,255,0.08),
+    0 32px 72px rgba(78,201,148,0.07),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
 
 /* ---- Inputs ------------------------------------------------------ */
 .input-row {
@@ -1067,6 +1084,15 @@ body.route-extractor #databasesPage,
   letter-spacing: .01em;
 }
 .results-actions { display: flex; gap: .42rem; }
+.append-btn {
+  align-items: center;
+  display: inline-flex;
+  font-size: 1rem;
+  justify-content: center;
+  min-width: 2rem;
+  padding-left: .55rem;
+  padding-right: .55rem;
+}
 
 /* ---- Filters ----------------------------------------------------- */
 .filter-bar {

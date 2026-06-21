@@ -169,7 +169,7 @@
     </section>
 
     <!-- Input Panel -->
-    <section class="panel panel-input extractor-view">
+    <section id="inputPanel" class="panel panel-input extractor-view">
       <div class="field-group">
         <label class="field-label" for="urlInput">University Programs Page URL</label>
         <div class="input-row">
@@ -186,6 +186,7 @@
           </button>
         </div>
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
+        <p id="appendStatus" class="append-status hidden" role="status" aria-live="polite"></p>
       </div>
 
     </section>
@@ -252,6 +253,7 @@
           <span id="sourcePill" class="source-tag"></span>
         </div>
         <div class="results-actions">
+          <button id="appendBtn" class="secondary-btn append-btn" type="button" title="Append" aria-label="Append">+</button>
           <button id="exportBtn" class="secondary-btn">Export CSV</button>
           <button id="clearBtn" class="ghost-btn">Clear</button>
         </div>

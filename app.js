@@ -35,6 +35,9 @@ const DEPTH_ONE_REQUEST_DEFAULTS = Object.freeze({
 // State
 let allPrograms = [];
 let activeResultsMode = "audit";
+let appendNextExtraction = false;
+let currentResultMode = null;
+let appendedSeedUrls = [];
 let catalogModeEnabled = false;
 let depthOneEnabled = false;
 let contentDiagnosticsEnabled = false;
@@ -94,6 +97,8 @@ let debugState = {
 
 //DOM refs
 const urlInput         = document.getElementById("urlInput");
+const inputPanel       = document.getElementById("inputPanel");
+const appendStatus     = document.getElementById("appendStatus");
 const apiHint          = document.getElementById("apiHint");
 const scrapeBtn        = document.getElementById("scrapeBtn");
 const statusSection    = document.getElementById("statusSection");
@@ -110,6 +115,7 @@ const tableBody        = document.getElementById("tableBody");
 const resultCount      = document.getElementById("resultCount");
 const sourcePill       = document.getElementById("sourcePill");
 const exportBtn        = document.getElementById("exportBtn");
+const appendBtn        = document.getElementById("appendBtn");
 const clearBtn         = document.getElementById("clearBtn");
 const noResults        = document.getElementById("noResults");
 const modal            = document.getElementById("modal");
@@ -1116,12 +1122,41 @@ function updateDebugStateFromBackend(data) {
 // Main flow
 scrapeBtn?.addEventListener("click", handleExtractClick);
 retryBtn?.addEventListener("click", () => { clearError(); handleExtractClick(); });
+appendBtn?.addEventListener("click", enterAppendMode);
 urlInput?.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
     handleExtractClick(e);
   }
 });
+urlInput?.addEventListener("input", clearAppendInputHighlight);
+urlInput?.addEventListener("blur", clearAppendInputHighlight);
+
+function enterAppendMode() {
+  appendNextExtraction = true;
+  clearError();
+  clearWarning();
+  showAppendStatus("Append mode ready. Paste another seed link and run extraction.");
+  inputPanel?.classList.add("append-input-highlight");
+  inputPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => urlInput?.focus({ preventScroll: true }), 250);
+}
+
+function clearAppendInputHighlight() {
+  inputPanel?.classList.remove("append-input-highlight");
+}
+
+function showAppendStatus(message) {
+  if (!appendStatus) return;
+  appendStatus.textContent = message || "";
+  appendStatus.classList.toggle("hidden", !message);
+}
+
+function resetAppendMode({ clearStatus = false } = {}) {
+  appendNextExtraction = false;
+  clearAppendInputHighlight();
+  if (clearStatus) showAppendStatus("");
+}
 
 function handleExtractClick(event) {
   event?.preventDefault();
@@ -1179,11 +1214,12 @@ function prepareExtractionRequest() {
   const debugOnly = isDebugMode();
   const catalogMode = isCatalogMode();
   const depthOne = isDepthOneEnabled();
+  const appendRequested = appendNextExtraction;
 
   resetDebugState();
   clearError();
   clearWarning();
-  hideResults();
+  if (!appendRequested || !allPrograms.length) hideResults();
   hideDebugPanel();
 
   if (!url) return showError("Please enter a URL.");
@@ -1195,7 +1231,7 @@ function prepareExtractionRequest() {
     return null;
   }
 
-  return { url, debugOnly, catalogMode, depthOne };
+  return { url, debugOnly, catalogMode, depthOne, appendRequested };
 }
 
 // Legacy access-code flow retained temporarily; not used by normal Google-auth extraction.
@@ -1210,16 +1246,21 @@ function ensureAccessCodeThenRun(request) {
 }
 
 async function runExtractionWithSession(request) {
-  const { url, debugOnly, catalogMode, depthOne } = request;
+  const { url, debugOnly, catalogMode, depthOne, appendRequested = false } = request;
+  const hasExistingRows = appendRequested && allPrograms.length > 0;
+  let requestAttempted = false;
 
   resetDebugState();
   clearError();
   clearWarning();
-  hideResults();
+  if (!hasExistingRows) hideResults();
   hideDebugPanel();
+  clearAppendInputHighlight();
+  showAppendStatus("");
 
   setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
   if (scrapeBtn) scrapeBtn.disabled = true;
+  if (appendBtn) appendBtn.disabled = true;
 
   let programs = [];
 
@@ -1232,13 +1273,13 @@ async function runExtractionWithSession(request) {
       if (debugOnly) console.warn("Could not start extraction progress messages.", progressError);
     }
 
+    requestAttempted = true;
     const result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+    const responseMode = catalogMode || isCatalogResponse(result) ? "catalog" : "audit";
 
-    if (catalogMode || isCatalogResponse(result)) {
-      activeResultsMode = "catalog";
+    if (responseMode === "catalog") {
       programs = normalizeCatalogRows(result.catalogRows);
     } else {
-      activeResultsMode = "audit";
       programs = Array.isArray(result.programmes)
         ? result.programmes
         : (Array.isArray(result.programs) ? result.programs : []);
@@ -1261,11 +1302,22 @@ async function runExtractionWithSession(request) {
         : (
             candidatesFound > 0
               ? "No final rows were extracted from the listing page. Candidate links were found, but normal extraction returned no rows."
-              : activeResultsMode === "catalog"
+              : responseMode === "catalog"
                 ? "No catalog rows were extracted from the listing page."
                 : "No programs were extracted from the listing page."
           );
+      if (hasExistingRows) {
+        hideStatus();
+        showWarning(emptyMessage);
+        return;
+      }
       return showError(emptyMessage);
+    }
+
+    if (hasExistingRows && currentResultMode && currentResultMode !== responseMode) {
+      hideStatus();
+      showWarning("Cannot append results with different table columns. Clear results or use the same mode.");
+      return;
     }
 
     if (isPartialResponse(result)) {
@@ -1277,7 +1329,7 @@ async function runExtractionWithSession(request) {
     stopStatusSequence();
     showStatus("Preparing results...", 90);
 
-    if (activeResultsMode !== "catalog") {
+    if (responseMode !== "catalog") {
       programs = programs.map(p => {
         p = mapSubjects(p);
         p = applyFinancialAidStatement(p);
@@ -1286,7 +1338,18 @@ async function runExtractionWithSession(request) {
     }
 
     showStatus("Building table output...", 96);
-    allPrograms = programs;
+    activeResultsMode = responseMode;
+    currentResultMode = responseMode;
+
+    if (hasExistingRows) {
+      const { rows, skipped } = appendUniqueRows(allPrograms, programs, responseMode);
+      allPrograms = rows;
+      appendedSeedUrls.push(url);
+      showAppendStatus(`Appended ${programs.length - skipped} new rows. Skipped ${skipped} duplicates.`);
+    } else {
+      allPrograms = programs;
+      appendedSeedUrls = [url];
+    }
 
     await sleep(250);
     renderResults(url);
@@ -1309,7 +1372,9 @@ async function runExtractionWithSession(request) {
     showError("Extraction failed: " + getErrorMessage(error));
   } finally {
     stopStatusSequence();
+    if (requestAttempted) resetAppendMode();
     if (scrapeBtn) scrapeBtn.disabled = false;
+    if (appendBtn) appendBtn.disabled = false;
     setButtonLoading(scrapeBtn, false, "", "Extract Programs");
   }
 }
@@ -1840,6 +1905,7 @@ function renderDebugPanel(forceVisible = false) {
     ["Depth-1 status", diagnostics.depthOneStatus || "not_requested"],
     ["Partial result", formatYesNo(diagnostics.partial)],
     ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
+    ["Appended seed URLs", appendedSeedUrls.length > 1 ? appendedSeedUrls.length : ""],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
 
   debugStatsEl.innerHTML = [
@@ -2562,25 +2628,73 @@ function mapSubjects(program) {
 
 //Render results
 function isCatalogResponse(result) {
-  return result?.extractionMode === "catalog";
+  return result?.extractionMode === "catalog" || Array.isArray(result?.catalogRows);
 }
 
 function normalizeCatalogRows(rows) {
   if (!Array.isArray(rows)) return [];
 
   return rows.map(row => ({
-    courseName: row?.courseName || "",
-    universityName: row?.universityName || "",
-    courseUrl: row?.courseUrl || "",
-    levelOfStudy: row?.levelOfStudy || "",
+    courseName: row?.courseName || row?.course_name || "",
+    universityName: row?.universityName || row?.university_name || "",
+    courseUrl: row?.courseUrl || row?.course_url || row?.courseLink || row?.url || "",
+    levelOfStudy: row?.levelOfStudy || row?.level_of_study || "",
     credits: row?.credits || "",
-    creditsUnit: row?.creditsUnit || "",
+    creditsUnit: row?.creditsUnit || row?.credits_unit || "",
     duration: row?.duration || "",
     fees: formatCatalogFeeDisplay(row?.fees),
     location: row?.location || "",
     language: row?.language || "",
-    modeOfStudy: row?.modeOfStudy || "",
+    modeOfStudy: row?.modeOfStudy || row?.mode_of_study || "",
   }));
+}
+
+function appendUniqueRows(existingRows, incomingRows, mode) {
+  const combined = [...existingRows];
+  const seen = new Set(existingRows.map(row => getRowDedupeKey(row, mode)));
+  let skipped = 0;
+
+  incomingRows.forEach(row => {
+    const key = getRowDedupeKey(row, mode);
+    if (seen.has(key)) {
+      skipped += 1;
+      return;
+    }
+    seen.add(key);
+    combined.push(row);
+  });
+
+  return { rows: combined, skipped };
+}
+
+function getRowDedupeKey(row, mode) {
+  if (mode === "catalog") {
+    const url = firstTrimmedValue(row?.courseUrl, row?.course_url, row?.courseLink, row?.url);
+    if (url) return `url:${normalizeDedupeUrl(url)}`;
+    return `name:${firstTrimmedValue(row?.courseName, row?.course_name)}|${firstTrimmedValue(row?.universityName, row?.university_name)}`;
+  }
+
+  const url = firstTrimmedValue(
+    row?.programUrl,
+    row?.programmeUrl,
+    row?.programLink,
+    row?.programmeLink,
+    row?.url,
+  );
+  if (url) return `url:${normalizeDedupeUrl(url)}`;
+  return `name:${firstTrimmedValue(row?.programName, row?.programmeName, row?.name)}|${firstTrimmedValue(row?.universityName)}`;
+}
+
+function firstTrimmedValue(...values) {
+  for (const value of values) {
+    const trimmed = String(value ?? "").trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
+function normalizeDedupeUrl(value) {
+  return String(value || "").trim().toLowerCase().replace(/\/+$/, "");
 }
 
 function formatCatalogFeeDisplay(value) {
@@ -2630,7 +2744,9 @@ function isCatalogResults() {
 function renderResults(sourceUrl) {
   let host;
   try { host = new URL(sourceUrl).hostname; } catch { host = sourceUrl; }
-  sourcePill.textContent = host;
+  sourcePill.textContent = appendedSeedUrls.length > 1
+    ? `${appendedSeedUrls.length} seed URLs`
+    : host;
   if (countLabel) countLabel.textContent = isCatalogResults() ? "catalog rows found from" : "programs found from";
   filterBar?.classList.toggle("hidden", isCatalogResults());
   noResults.textContent = isCatalogResults() ? "No catalog rows to display." : "No programs match your filters.";
@@ -3053,6 +3169,9 @@ exportBtn.addEventListener("click", () => {
 clearBtn.addEventListener("click", () => {
   allPrograms = [];
   activeResultsMode = "audit";
+  currentResultMode = null;
+  appendedSeedUrls = [];
+  resetAppendMode({ clearStatus: true });
   sortCol = null;
   sortDir = 1;
   urlInput.value = "";
