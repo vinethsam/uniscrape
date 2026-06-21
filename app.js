@@ -308,7 +308,18 @@ function renderAuthModalState(state) {
     authModalBody.innerHTML = `
       <p class="field-hint">Sign in to use UniScrape.</p>
       <input type="text" id="preSignInNameInput" class="text-input" placeholder="Your name, e.g. Timothy" maxlength="80" value="${esc(cachedName)}" />
-      <div id="googleSignInBtn"></div>
+      <div id="googleBtnStack" class="google-btn-stack">
+        <button type="button" id="staticGoogleBtn" class="static-google-btn">
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91A8.78 8.78 0 0 0 17.64 9.2z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.81.54-1.85.86-3.05.86-2.34 0-4.33-1.58-5.04-3.71H.96v2.33A9 9 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.96 10.71A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.17.29-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3-2.33z"/>
+            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A8.59 8.59 0 0 0 9 0a9 9 0 0 0-8.04 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"/>
+          </svg>
+          <span>Sign in with Google</span>
+        </button>
+        <div id="googleSignInBtn" class="google-btn-real"></div>
+      </div>
     `;
     renderGoogleButton();
     return;
@@ -339,13 +350,13 @@ function renderAuthModalState(state) {
 }
 
 function renderGoogleButton() {
-  const googleButton = document.getElementById("googleSignInBtn");
-  if (!googleButton) return;
   if (!window.google || !window.google.accounts) {
     setTimeout(renderGoogleButton, 300);
     return;
   }
 
+  const googleButton = document.getElementById("googleSignInBtn");
+  if (!googleButton) return;
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleGoogleSignIn,
@@ -357,7 +368,7 @@ function renderGoogleButton() {
       size: "large",
       shape: "pill",
       text: "signin_with",
-      logo_alignment: "left",
+      width: googleButton.offsetWidth || 280,
     }
   );
 }
