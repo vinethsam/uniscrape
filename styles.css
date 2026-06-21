@@ -1283,18 +1283,40 @@ td.name-cell { max-width: 210px; font-weight: 500; }
   font-family: var(--font);
   font-size: 0.85rem;
   font-weight: 500;
-  cursor: pointer;
+  cursor: default;
   transition: background 0.15s ease, transform 0.1s ease;
+  opacity: 0.6;
   pointer-events: none;
   z-index: 1;
 }
 
-.google-btn-stack:hover .static-google-btn {
+.btn-label-ready {
+  display: none;
+}
+
+.btn-label-loading {
+  display: inline;
+}
+
+.google-btn-stack.btn-ready .btn-label-ready {
+  display: inline;
+}
+
+.google-btn-stack.btn-ready .btn-label-loading {
+  display: none;
+}
+
+.google-btn-stack.btn-ready:hover .static-google-btn {
   background: #f4f4f4;
 }
 
-.google-btn-stack:active .static-google-btn {
+.google-btn-stack.btn-ready:active .static-google-btn {
   transform: scale(0.98);
+}
+
+.google-btn-stack.btn-ready .static-google-btn {
+  opacity: 1;
+  cursor: pointer;
 }
 
 .google-btn-real {
@@ -1305,8 +1327,12 @@ td.name-cell { max-width: 210px; font-weight: 500; }
   height: 100%;
   opacity: 0;
   z-index: 2;
-  pointer-events: auto;
+  pointer-events: none;
   overflow: hidden;
+}
+
+.google-btn-stack.btn-ready .google-btn-real {
+  pointer-events: auto;
 }
 
 .google-btn-real iframe {

@@ -316,7 +316,8 @@ function renderAuthModalState(state) {
             <path fill="#FBBC05" d="M3.96 10.71A5.41 5.41 0 0 1 3.67 9c0-.59.1-1.17.29-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3-2.33z"/>
             <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A8.59 8.59 0 0 0 9 0a9 9 0 0 0-8.04 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"/>
           </svg>
-          <span>Sign in with Google</span>
+          <span class="btn-label-loading">Loading...</span>
+          <span class="btn-label-ready">Sign in with Google</span>
         </button>
         <div id="googleSignInBtn" class="google-btn-real"></div>
       </div>
@@ -353,35 +354,68 @@ function renderAuthModalState(state) {
   }
 }
 
-function renderGoogleButton() {
+function renderGoogleButton(retryCount = 0) {
   if (!window.google || !window.google.accounts) {
     setTimeout(renderGoogleButton, 300);
     return;
   }
 
-  const googleButton = document.getElementById("googleSignInBtn");
-  if (!googleButton) return;
-  const safeWidth = Math.min(googleButton.offsetWidth || 280, 280);
+  const container = document.getElementById("googleSignInBtn");
+  const staticBtn = document.getElementById("staticGoogleBtn");
+  const stack = document.getElementById("googleBtnStack");
+  if (!container || !staticBtn || !stack) return;
+
+  container.innerHTML = "";
+  stack.classList.remove("btn-ready");
+
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleGoogleSignIn,
+    use_fedcm_for_prompt: true,
   });
+
+  const markReadyIfPresent = () => {
+    const iframe = container.querySelector("iframe");
+    if (!iframe) return false;
+    stack.classList.add("btn-ready");
+    observer.disconnect();
+    return true;
+  };
+
+  const observer = new MutationObserver(() => {
+    markReadyIfPresent();
+  });
+  observer.observe(container, { childList: true, subtree: true });
+
   google.accounts.id.renderButton(
-    googleButton,
+    container,
     {
       theme: "filled_black",
       size: "large",
       shape: "pill",
       text: "signin_with",
-      width: safeWidth > 0 ? safeWidth : 280,
+      width: 280,
     }
   );
-  console.log(
-    "[auth] Google button rendered. Container size:",
-    googleButton.offsetWidth,
-    "x",
-    googleButton.offsetHeight
-  );
+
+  // renderButton may insert synchronously, before the observer callback runs.
+  markReadyIfPresent();
+
+  setTimeout(() => {
+    const isCurrentContainer = (
+      container.isConnected
+      && document.getElementById("googleSignInBtn") === container
+    );
+    if (!isCurrentContainer || markReadyIfPresent()) return;
+
+    observer.disconnect();
+    if (retryCount === 0) {
+      console.warn("[auth] Google iframe never appeared, retrying render.");
+      renderGoogleButton(1);
+    } else {
+      console.warn("[auth] Google iframe never appeared after retry.");
+    }
+  }, 4000);
 }
 
 async function handleGoogleSignIn(response) {
