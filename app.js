@@ -24,13 +24,11 @@ const ACCESS_CODE_VERIFY_ERROR_MESSAGE = "Could not verify access code. Please t
 const FINANCIAL_AID_STATEMENT = "This university offers some form of financial aid to prospective students. Please always check the specific requirements and restrictions on scholarship availability.";
 const DEFAULT_CONTENT_MODE = "auto";
 const DEPTH_ONE_REQUEST_DEFAULTS = Object.freeze({
-  max_detail_pages: 10,
   detail_delay_ms: 750,
   include_detail_markdown_debug: false,
   enrich_detail_fields: true,
   include_non_award_short_courses: false,
   max_field_enrichment_links_per_programme: 2,
-  max_total_field_enrichment_pages: 10,
   max_field_enrichment_chars_per_page: 12000,
   expand_detail_accordions: true,
   expand_enrichment_accordions: true,
@@ -40,7 +38,6 @@ const DEPTH_ONE_REQUEST_DEFAULTS = Object.freeze({
   soft_timeout_buffer_ms: 12000,
   max_discovery_runtime_ms: 55000,
   max_detail_runtime_ms: 45000,
-  max_model_calls_per_request: 10,
   return_partial_on_timeout: true,
   fail_fast_on_seed_timeout: false,
   compact_debug_on_partial: true,
@@ -1053,10 +1050,17 @@ async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, de
 
 async function readBackendExtractResponse(res) {
   const data = await res.json().catch(() => null);
+  const backendDetail = String(data?.detail || "");
+
+  if (/Full production depth-1 extraction is not implemented yet/i.test(backendDetail)) {
+    throw new Error(
+      "The deployed backend is out of date and still requires debug mode for Depth-1. Deploy the current backend patch and try again."
+    );
+  }
 
   if (res.status === 401 || res.status === 403) {
-    const error = new Error(data?.detail || "Your session is not authorised for extraction.");
-    error.code = /password|access code/i.test(String(data?.detail || ""))
+    const error = new Error(backendDetail || "Your session is not authorised for extraction.");
+    error.code = /password|access code/i.test(backendDetail)
       ? "EXTRACTION_AUTH_REJECTED"
       : "SESSION_AUTH_REQUIRED";
     throw error;
