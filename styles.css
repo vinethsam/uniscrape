@@ -374,18 +374,6 @@ header {
 }
 .settings-row-toggle { cursor: pointer; }
 .settings-row-column { align-items: stretch; flex-direction: column; gap: .38rem; }
-.settings-toggle-copy {
-  display: flex;
-  flex-direction: column;
-  gap: .18rem;
-  min-width: 0;
-}
-.settings-helper {
-  max-width: 190px;
-  color: var(--faint);
-  font-size: .62rem;
-  line-height: 1.35;
-}
 
 .settings-nav-link {
   min-height: 2.25rem;
