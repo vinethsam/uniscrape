@@ -130,38 +130,6 @@
 
   <main>
 
-    <!-- Status -->
-    <section id="statusSection" class="panel status-panel hidden">
-      <div class="status-row">
-        <span class="spinner"></span>
-        <span>
-          <span id="statusText">Working...</span>
-          <span id="statusDetail" class="status-detail hidden"></span>
-        </span>
-      </div>
-      <div class="progress-track">
-        <div id="progressFill" class="progress-fill"></div>
-      </div>
-    </section>
-
-    <!-- Error -->
-    <section id="errorSection" class="hidden">
-      <div class="error-box">
-        <span class="error-label">ERROR</span>
-        <div class="error-body">
-          <span id="errorText"></span>
-          <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="warningSection" class="hidden">
-      <div class="warning-box">
-        <span class="warning-label">NOTICE</span>
-        <span id="warningText"></span>
-      </div>
-    </section>
-
     <section id="databasesPage" class="databases-page hidden" hidden aria-labelledby="databasesTitle">
       <div class="databases-header">
         <div>
@@ -220,6 +188,39 @@
         <p class="field-hint">Paste the link to a university's full course or programme listing page for best results.</p>
       </div>
 
+    </section>
+
+    <!-- Extraction status and progress -->
+    <section id="statusSection" class="panel status-panel extractor-view hidden">
+      <div class="status-row">
+        <span class="spinner"></span>
+        <span>
+          <span id="statusText">Working...</span>
+          <span id="statusDetail" class="status-detail hidden"></span>
+        </span>
+      </div>
+      <div class="progress-track">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+    </section>
+
+    <!-- Extraction errors -->
+    <section id="errorSection" class="extractor-view hidden">
+      <div class="error-box">
+        <span class="error-label">ERROR</span>
+        <div class="error-body">
+          <span id="errorText"></span>
+          <button id="retryBtn" type="button" class="secondary-btn error-retry-btn hidden">Retry</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Extraction warnings and partial-result notices -->
+    <section id="warningSection" class="extractor-view hidden">
+      <div class="warning-box">
+        <span class="warning-label">NOTICE</span>
+        <span id="warningText"></span>
+      </div>
     </section>
 
     <!-- Content diagnostics (visible only when the diagnostics toggle is on) -->

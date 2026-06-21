@@ -1057,7 +1057,7 @@ async function readBackendExtractResponse(res) {
   if (res.status === 401 || res.status === 403) {
     const error = new Error(data?.detail || "Your session is not authorised for extraction.");
     error.code = /password|access code/i.test(String(data?.detail || ""))
-      ? "BACKEND_LEGACY_PASSWORD_REQUIRED"
+      ? "EXTRACTION_AUTH_REJECTED"
       : "SESSION_AUTH_REQUIRED";
     throw error;
   }
@@ -1292,8 +1292,8 @@ async function runExtractionWithSession(request) {
       openAuthModal(() => runExtractionWithSession(request));
       return;
     }
-    if (error?.code === "BACKEND_LEGACY_PASSWORD_REQUIRED") {
-      showError("The extraction API still requires the retired access-code contract and is not yet accepting Google sessions.");
+    if (error?.code === "EXTRACTION_AUTH_REJECTED") {
+      showError("Extraction authorization failed. The backend did not accept the current Google session.");
       return;
     }
     if (debugOnly) console.error("UniScrape extraction failed.", error);
