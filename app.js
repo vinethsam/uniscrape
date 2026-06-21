@@ -44,6 +44,7 @@ let pendingGoogleIdToken = "";
 let pendingPollInterval = null;
 let pendingScrapeAction = null;
 let googleIdentityInitialized = false;
+let signInSucceededThisAttempt = false;
 
 let debugState = {
   rawHtml: "",
@@ -376,28 +377,51 @@ function handleStaticGoogleClick() {
   const label = btn.querySelector("span");
   btn.disabled = true;
   if (label) label.textContent = "Opening Google...";
+  signInSucceededThisAttempt = false;
 
   google.accounts.id.prompt((notification) => {
-    btn.disabled = false;
-    if (label) label.textContent = "Sign in with Google";
+    setTimeout(() => {
+      if (signInSucceededThisAttempt) return;
 
-    const wasNotDisplayed = notification.isNotDisplayed?.() || false;
-    const wasSkipped = notification.isSkippedMoment?.() || false;
-    if (wasNotDisplayed || wasSkipped) {
+      btn.disabled = false;
+      if (label) label.textContent = "Sign in with Google";
+
+      const wasNotDisplayed = notification.isNotDisplayed?.() || false;
+      const wasSkipped = notification.isSkippedMoment?.() || false;
+      if (!wasNotDisplayed && !wasSkipped) return;
+
       const reason = (
         notification.getNotDisplayedReason?.()
         || notification.getSkippedReason?.()
-        || "unknown reason"
+        || "unknown"
       );
-      console.warn("[auth] Google prompt did not display:", reason);
-      showError(
-        "Google sign-in could not open. Please check that third-party cookies/popups are allowed for this site, then try again."
-      );
-    }
+      console.warn("[auth] Google prompt closed without a credential. Reason:", reason);
+
+      const blockingReasons = [
+        "browser_not_supported",
+        "invalid_client",
+        "missing_client_id",
+        "secure_http_required",
+      ];
+      if (blockingReasons.includes(reason)) {
+        showError(
+          "Google sign-in could not open. Please check that third-party cookies/popups are allowed for this site, then try again."
+        );
+      }
+    }, 800);
   });
 }
 
 async function handleGoogleSignIn(response) {
+  signInSucceededThisAttempt = true;
+
+  const btn = document.getElementById("staticGoogleBtn");
+  if (btn) {
+    btn.disabled = false;
+    const label = btn.querySelector("span");
+    if (label) label.textContent = "Sign in with Google";
+  }
+
   pendingGoogleIdToken = response?.credential || "";
   if (!pendingGoogleIdToken) {
     renderAuthModalMessage("Sign-in failed: Google did not return an identity token.");
