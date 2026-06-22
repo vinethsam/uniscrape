@@ -4,6 +4,16 @@
 
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/crawl";
+const FRONTEND_BUILD_MARKER = "frontend_response_parser_trace_v1";
+console.debug("[uniscrape] frontend build", FRONTEND_BUILD_MARKER);
+
+const getFinalRowsFromResponse =
+  globalThis.UniScrapeResponseParser?.getFinalRowsFromResponse;
+
+if (typeof getFinalRowsFromResponse !== "function") {
+  throw new Error("UniScrape response parser failed to load.");
+}
+
 const VERIFY_ACCESS_API_URL = new URL("/verify-access", EXTRACT_API_URL).toString();
 const AUTH_GOOGLE_URL = "https://api.uniscrape.com/auth/google";
 const AUTH_SETNAME_URL = "https://api.uniscrape.com/auth/set-name-with-token";
@@ -90,6 +100,10 @@ let debugState = {
     markdownCharsAfterPreparser: 0,
     modelUsed: "",
     source: "",
+    backendPatch: "",
+    routeName: "",
+    responseMetaRowCount: null,
+    frontendFinalRowCount: null,
     diagnostics: {},
     partial: false,
   },
@@ -1010,11 +1024,8 @@ function buildBackendExtractPayload(url, debugOnly, catalogMode = false, depthOn
     url,
     debug: debugOnly,
     extract_details: Boolean(depthOne),
+    extractionMode: catalogMode ? "catalog" : "audit",
   };
-
-  if (catalogMode) {
-    payload.extractionMode = "catalog";
-  }
 
   if (depthOne) {
     Object.assign(payload, DEPTH_ONE_REQUEST_DEFAULTS);
@@ -1033,13 +1044,22 @@ async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, de
   }
 
   const payload = buildBackendExtractPayload(url, debugOnly, catalogMode, depthOne);
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${sessionToken}`,
+  };
+
+  console.debug("[uniscrape] extraction request", {
+    apiUrl: EXTRACT_API_URL,
+    extractionMode: payload.extractionMode,
+    extract_details: payload.extract_details,
+    debug: payload.debug,
+    hasAuthorization: Boolean(headers.Authorization),
+  });
 
   const res = await fetch(EXTRACT_API_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${sessionToken}`,
-    },
+    headers,
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   });
@@ -1049,6 +1069,21 @@ async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, de
 
 async function readBackendExtractResponse(res) {
   const data = await res.json().catch(() => null);
+
+  console.debug("[uniscrape] raw response row fields", {
+    backendPatch: data?.responseMeta?.backendPatch,
+    routeName: data?.responseMeta?.routeName,
+    responseMetaRowCount: data?.responseMeta?.rowCount,
+    catalogRows: Array.isArray(data?.catalogRows) ? data.catalogRows.length : null,
+    programmes: Array.isArray(data?.programmes) ? data.programmes.length : null,
+    programs: Array.isArray(data?.programs) ? data.programs.length : null,
+    programmeCandidates: Array.isArray(data?.programmeCandidates)
+      ? data.programmeCandidates.length
+      : null,
+    finalOutputSource: data?.finalOutputSource || data?.debugRowContract?.finalOutputSource,
+    debugRowContract: data?.debugRowContract,
+  });
+
   const backendDetail = String(data?.detail || "");
 
   if (/Full production depth-1 extraction is not implemented yet/i.test(backendDetail)) {
@@ -1112,6 +1147,9 @@ function updateDebugStateFromBackend(data) {
   debugState.backend.markdownCharsAfterPreparser = Number(data.markdownCharsAfterPreparser || 0);
   debugState.backend.modelUsed = data.modelUsed || "";
   debugState.backend.source = data.source || "backend";
+  debugState.backend.backendPatch = data.responseMeta?.backendPatch || "";
+  debugState.backend.routeName = data.responseMeta?.routeName || "";
+  debugState.backend.responseMetaRowCount = data.responseMeta?.rowCount ?? null;
   debugState.backend.diagnostics = getResponseDiagnostics(data);
   debugState.backend.partial = Boolean(data.frontendDiagnostics?.partial ?? data.partial);
 
@@ -1275,43 +1313,43 @@ async function runExtractionWithSession(request) {
 
     requestAttempted = true;
     const result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
-    const responseMode = catalogMode || isCatalogResponse(result) ? "catalog" : "audit";
+    const responseMode = catalogMode ? "catalog" : "audit";
+    const finalRows = getFinalRowsFromResponse(result, responseMode);
+
+    debugState.backend.frontendFinalRowCount = finalRows.length;
+    console.debug("[uniscrape] frontend final rows", {
+      mode: responseMode,
+      finalRows: finalRows.length,
+    });
 
     if (responseMode === "catalog") {
-      programs = normalizeCatalogRows(result.catalogRows);
+      programs = normalizeCatalogRows(finalRows);
     } else {
-      programs = Array.isArray(result.programmes)
-        ? result.programmes
-        : (Array.isArray(result.programs) ? result.programs : []);
+      programs = finalRows;
     }
 
     if (!programs.length) {
       if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
+      const responseMetaRowCount = Number(result?.responseMeta?.rowCount || 0);
+
+      if (responseMetaRowCount > 0) {
+        return showError(
+          "Backend metadata reports rows, but frontend could not find them in catalogRows/programmes/programs."
+        );
+      }
+
       const diagnostics = getResponseDiagnostics(result);
       const candidatesFound = Math.max(
         Number(diagnostics.candidateCount || 0),
         Number(result?.discoveredProgrammeCount || 0),
         Array.isArray(result?.programmeCandidates) ? result.programmeCandidates.length : 0,
       );
-      const emptyMessage = depthOne
-        ? (
-            candidatesFound > 0
-              ? "Programme candidates were found, but no final rows were returned. Check Content diagnostics for detail/fallback status."
-              : "Depth-1 extraction did not produce final rows."
-          )
-        : (
-            candidatesFound > 0
-              ? "No final rows were extracted from the listing page. Candidate links were found, but normal extraction returned no rows."
-              : responseMode === "catalog"
-                ? "No catalog rows were extracted from the listing page."
-                : "No programs were extracted from the listing page."
-          );
-      if (hasExistingRows) {
-        hideStatus();
-        showWarning(emptyMessage);
-        return;
-      }
-      return showError(emptyMessage);
+      hideStatus();
+      return showWarning(
+        candidatesFound > 0
+          ? "Programme candidates were found, but no final rows were returned. Check Content diagnostics for detail/fallback status."
+          : "No final rows were returned."
+      );
     }
 
     if (hasExistingRows && currentResultMode && currentResultMode !== responseMode) {
@@ -1670,6 +1708,10 @@ function resetDebugState() {
     markdownCharsAfterPreparser: 0,
     modelUsed: "",
     source: "",
+    backendPatch: "",
+    routeName: "",
+    responseMetaRowCount: null,
+    frontendFinalRowCount: null,
     diagnostics: {},
     partial: false,
   };
@@ -1890,6 +1932,10 @@ function renderDebugPanel(forceVisible = false) {
   const markdown = debugState.finalExtractionMarkdown || debugState.markdown || "";
   const diagnostics = be.diagnostics || {};
   const diagnosticRows = [
+    ["Backend patch", be.backendPatch],
+    ["Backend route", be.routeName],
+    ["Backend metadata rows", be.responseMetaRowCount],
+    ["Frontend final rows", be.frontendFinalRowCount],
     ["Normal extraction attempted", formatYesNo(diagnostics.normalExtractionAttempted)],
     ["Normal extraction succeeded", formatYesNo(diagnostics.normalExtractionSucceeded)],
     ["Candidate discovery attempted", formatYesNo(diagnostics.candidateDiscoveryAttempted)],
@@ -2627,10 +2673,6 @@ function mapSubjects(program) {
 }
 
 //Render results
-function isCatalogResponse(result) {
-  return result?.extractionMode === "catalog" || Array.isArray(result?.catalogRows);
-}
-
 function normalizeCatalogRows(rows) {
   if (!Array.isArray(rows)) return [];
 

@@ -1,0 +1,133 @@
+import json
+import mimetypes
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ORIGIN = "http://127.0.0.1:8767"
+LAST_REQUEST_PATH = ROOT / "tests" / ".browser-fixture-last-request.json"
+
+
+def response_for(payload):
+    source_url = str(payload.get("url") or "")
+    meta = {
+        "backendPatch": "fixture_backend_patch_v1",
+        "routeName": "crawl",
+    }
+
+    if "catalog" in source_url:
+        return {
+            "catalogRows": [{
+                "courseName": "Catalog A",
+                "universityName": "Fixture University",
+                "courseUrl": "https://fixture.test/catalog-a",
+            }],
+            "responseMeta": {**meta, "rowCount": 1},
+        }
+
+    if "programs-fallback" in source_url:
+        return {
+            "programs": [{
+                "name": "Fallback Audit A",
+                "url": "https://fixture.test/fallback-a",
+            }],
+            "responseMeta": {**meta, "rowCount": 1},
+        }
+
+    if "candidates-only" in source_url:
+        return {
+            "programmeCandidates": [{"title": "Candidate A"}],
+            "responseMeta": {**meta, "rowCount": 0},
+        }
+
+    if "metadata-mismatch" in source_url:
+        return {
+            "responseMeta": {**meta, "rowCount": 1},
+        }
+
+    return {
+        "programmes": [{
+            "name": "Audit A",
+            "url": "https://fixture.test/audit-a",
+        }],
+        "responseMeta": {**meta, "rowCount": 1},
+    }
+
+
+class FixtureHandler(BaseHTTPRequestHandler):
+    def log_message(self, _format, *_args):
+        return
+
+    def send_bytes(self, status, content, content_type):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def send_json(self, status, data):
+        content = json.dumps(data).encode("utf-8")
+        self.send_bytes(status, content, "application/json")
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        if path == "/auth/status":
+            self.send_json(200, {
+                "status": "approved",
+                "email": "fixture@uniscrape.test",
+                "name": "Fixture User",
+                "is_admin": False,
+            })
+            return
+
+        relative_path = "index.html" if path == "/" else path.lstrip("/")
+        file_path = (ROOT / relative_path).resolve()
+
+        if ROOT not in file_path.parents and file_path != ROOT:
+            self.send_json(404, {"detail": "Not found"})
+            return
+
+        if not file_path.is_file():
+            self.send_json(404, {"detail": "Not found"})
+            return
+
+        content = file_path.read_bytes()
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+
+        if relative_path == "index.html":
+            html = content.decode("utf-8")
+            bootstrap = (
+                "<script>"
+                "localStorage.setItem('uniscrape_session_token','fixture-token');"
+                "localStorage.setItem('uniscrape_display_name','Fixture User');"
+                "</script>"
+            )
+            content = html.replace("</head>", bootstrap + "</head>").encode("utf-8")
+
+        if relative_path == "app.js":
+            script = content.decode("utf-8")
+            content = script.replace("https://api.uniscrape.com", ORIGIN).encode("utf-8")
+
+        self.send_bytes(200, content, content_type)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(length) or b"{}")
+
+        if path == "/crawl":
+            LAST_REQUEST_PATH.write_text(json.dumps({
+                "payload": payload,
+                "hasAuthorization": bool(self.headers.get("Authorization")),
+            }), encoding="utf-8")
+            self.send_json(200, response_for(payload))
+            return
+
+        self.send_json(404, {"detail": "Not found"})
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(("127.0.0.1", 8767), FixtureHandler).serve_forever()
