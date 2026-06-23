@@ -17,6 +17,40 @@ def response_for(payload):
         "routeName": "crawl",
     }
 
+    if "ucas.com" in source_url:
+        security_blocked = "security-fixture" in source_url
+        return {
+            "catalogRows": [{
+                "program_name": "Fixture UCAS Course",
+                "provider_name": "Fixture UCAS University",
+                "ucas_tariff_raw": 0,
+                "preferred_fee_raw": "£9,535",
+                "fee_status": "fee_found",
+                "qualification": "BSc (Hons)",
+                "study_mode": "Full-time",
+                "duration": "3 years",
+                "start_date_or_month": "September 2026",
+                "campus": "Main Campus",
+                "program_url": "https://www.ucas.com/explore/courses/FIXTURE1",
+            }],
+            "diagnostics": {
+                "ucasMode": True,
+                "ucasDetected": True,
+                "staticOnly": True,
+                "llmUsed": False,
+                "playwrightUsed": False,
+                "rowsOutput": 1,
+                "ucasComplete": not security_blocked,
+                "partial": security_blocked,
+                "securityPageDetected": security_blocked,
+                "blockedPageCount": 1 if security_blocked else 0,
+                "blockedPageUrls": [source_url] if security_blocked else [],
+                "blockedPageType": "cloudflare_challenge" if security_blocked else "",
+                "paginationStoppedReason": "security_page_detected" if security_blocked else "completed",
+            },
+            "responseMeta": {**meta, "rowCount": 1},
+        }
+
     if "catalog" in source_url:
         return {
             "catalogRows": [{

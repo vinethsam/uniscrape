@@ -7,10 +7,23 @@ const EXTRACT_API_URL = "https://api.uniscrape.com/crawl";
 const FRONTEND_BUILD_MARKER = "frontend_response_parser_trace_v1";
 console.debug("[uniscrape] frontend build", FRONTEND_BUILD_MARKER);
 
-const getFinalRowsFromResponse =
-  globalThis.UniScrapeResponseParser?.getFinalRowsFromResponse;
+const {
+  getFinalRowsFromResponse,
+  getUcasDiagnostics,
+  hasUcasSecurityPage,
+  isUcasResponse,
+  isUcasUrl,
+  normalizeUcasRows,
+} = globalThis.UniScrapeResponseParser || {};
 
-if (typeof getFinalRowsFromResponse !== "function") {
+if (
+  typeof getFinalRowsFromResponse !== "function" ||
+  typeof getUcasDiagnostics !== "function" ||
+  typeof hasUcasSecurityPage !== "function" ||
+  typeof isUcasResponse !== "function" ||
+  typeof isUcasUrl !== "function" ||
+  typeof normalizeUcasRows !== "function"
+) {
   throw new Error("UniScrape response parser failed to load.");
 }
 
@@ -47,6 +60,7 @@ let allPrograms = [];
 let activeResultsMode = "audit";
 let appendNextExtraction = false;
 let currentResultMode = null;
+let currentUcasModeConfirmed = false;
 let appendedSeedUrls = [];
 let catalogModeEnabled = false;
 let depthOneEnabled = false;
@@ -113,6 +127,7 @@ let debugState = {
 const urlInput         = document.getElementById("urlInput");
 const inputPanel       = document.getElementById("inputPanel");
 const appendStatus     = document.getElementById("appendStatus");
+const ucasModeStatus   = document.getElementById("ucasModeStatus");
 const apiHint          = document.getElementById("apiHint");
 const scrapeBtn        = document.getElementById("scrapeBtn");
 const statusSection    = document.getElementById("statusSection");
@@ -219,6 +234,21 @@ const CATALOG_TABLE_HEADER_HTML = `
   <th>Mode of study</th>
 `;
 
+const UCAS_TABLE_HEADER_HTML = `
+  <th class="col-num">#</th>
+  <th>Programme Name</th>
+  <th>University / Provider</th>
+  <th>UCAS Points</th>
+  <th>Fee</th>
+  <th>Fee Status / Fee Type</th>
+  <th>Qualification</th>
+  <th>Study Mode</th>
+  <th>Duration</th>
+  <th>Start Date</th>
+  <th>Location / Campus</th>
+  <th>Course URL</th>
+`;
+
 const AUDIT_CSV_COLUMNS = [
   "name", "level", "faculty", "department", "broad_subject", "narrow_subject",
   "location", "mode", "duration", "language_of_instruction",
@@ -245,6 +275,26 @@ const CATALOG_CSV_COLUMNS = [
   "location",
   "language",
   "modeOfStudy"
+];
+
+const UCAS_CSV_COLUMNS = [
+  ["Programme Name", "programName"],
+  ["University / Provider", "universityProvider"],
+  ["UCAS Points", "ucasPoints"],
+  ["UCAS Points Min", "ucasPointsMin"],
+  ["UCAS Points Max", "ucasPointsMax"],
+  ["Fee", "fee"],
+  ["Fee Status", "feeStatus"],
+  ["International Fee", "internationalFee"],
+  ["Home Fee", "homeFee"],
+  ["Qualification", "qualification"],
+  ["Study Mode", "studyMode"],
+  ["Duration", "duration"],
+  ["Start Date", "startDate"],
+  ["Location / Campus", "location"],
+  ["Course URL", "courseUrl"],
+  ["Listing Page", "listingPage"],
+  ["Source URL", "sourceUrl"],
 ];
 
 const ACCESS_CODE_SUBMIT_LABEL = "Unlock and Continue";
@@ -1100,6 +1150,16 @@ async function readBackendExtractResponse(res) {
     throw error;
   }
 
+  const hasUsablePartialUcasRows =
+    isUcasResponse(data) &&
+    isPartialResponse(data) &&
+    getFinalRowsFromResponse(data, "ucas").length > 0;
+
+  if (!res.ok && hasUsablePartialUcasRows) {
+    updateDebugStateFromBackend(data);
+    return data;
+  }
+
   if (res.status === 422) {
     updateDebugStateFromBackend(data);
     throw new Error(data?.detail || "Model returned no valid programs.");
@@ -1151,7 +1211,7 @@ function updateDebugStateFromBackend(data) {
   debugState.backend.routeName = data.responseMeta?.routeName || "";
   debugState.backend.responseMetaRowCount = data.responseMeta?.rowCount ?? null;
   debugState.backend.diagnostics = getResponseDiagnostics(data);
-  debugState.backend.partial = Boolean(data.frontendDiagnostics?.partial ?? data.partial);
+  debugState.backend.partial = isPartialResponse(data);
 
   debugState.apiDiscovery.finalSource = data.source || "backend";
   debugState.renderApi.finalSource = data.source || "backend";
@@ -1167,8 +1227,13 @@ urlInput?.addEventListener("keydown", e => {
     handleExtractClick(e);
   }
 });
-urlInput?.addEventListener("input", clearAppendInputHighlight);
+urlInput?.addEventListener("input", () => {
+  clearAppendInputHighlight();
+  currentUcasModeConfirmed = false;
+  updateUcasModeStatus();
+});
 urlInput?.addEventListener("blur", clearAppendInputHighlight);
+updateUcasModeStatus();
 
 function enterAppendMode() {
   appendNextExtraction = true;
@@ -1188,6 +1253,27 @@ function showAppendStatus(message) {
   if (!appendStatus) return;
   appendStatus.textContent = message || "";
   appendStatus.classList.toggle("hidden", !message);
+}
+
+function updateUcasModeStatus(options = {}) {
+  if (!ucasModeStatus) return;
+
+  const diagnostics = options.diagnostics || {};
+  const active = options.active ?? (currentUcasModeConfirmed || isUcasUrl(urlInput?.value));
+
+  if (!active) {
+    ucasModeStatus.textContent = "";
+    ucasModeStatus.classList.add("hidden");
+    return;
+  }
+
+  const details = ["Static catalog extraction"];
+  if (diagnostics.staticOnly === true) details.push("Static fetch");
+  if (diagnostics.llmUsed === false) details.push("No AI");
+  if (diagnostics.playwrightUsed === false) details.push("No Playwright");
+
+  ucasModeStatus.textContent = `UCAS mode active · ${[...new Set(details)].join(" · ")}`;
+  ucasModeStatus.classList.remove("hidden");
 }
 
 function resetAppendMode({ clearStatus = false } = {}) {
@@ -1253,6 +1339,7 @@ function prepareExtractionRequest() {
   const catalogMode = isCatalogMode();
   const depthOne = isDepthOneEnabled();
   const appendRequested = appendNextExtraction;
+  const ucasHint = isUcasUrl(url);
 
   resetDebugState();
   clearError();
@@ -1269,7 +1356,7 @@ function prepareExtractionRequest() {
     return null;
   }
 
-  return { url, debugOnly, catalogMode, depthOne, appendRequested };
+  return { url, debugOnly, catalogMode, depthOne, appendRequested, ucasHint };
 }
 
 // Legacy access-code flow retained temporarily; not used by normal Google-auth extraction.
@@ -1284,7 +1371,14 @@ function ensureAccessCodeThenRun(request) {
 }
 
 async function runExtractionWithSession(request) {
-  const { url, debugOnly, catalogMode, depthOne, appendRequested = false } = request;
+  const {
+    url,
+    debugOnly,
+    catalogMode,
+    depthOne,
+    appendRequested = false,
+    ucasHint = isUcasUrl(url),
+  } = request;
   const hasExistingRows = appendRequested && allPrograms.length > 0;
   let requestAttempted = false;
 
@@ -1296,7 +1390,12 @@ async function runExtractionWithSession(request) {
   clearAppendInputHighlight();
   showAppendStatus("");
 
-  setButtonLoading(scrapeBtn, true, "Extracting...", "Extract Programs");
+  setButtonLoading(
+    scrapeBtn,
+    true,
+    ucasHint ? "Fetching UCAS..." : "Extracting...",
+    "Extract Programs",
+  );
   if (scrapeBtn) scrapeBtn.disabled = true;
   if (appendBtn) appendBtn.disabled = true;
 
@@ -1305,7 +1404,11 @@ async function runExtractionWithSession(request) {
   try {
     try {
       setStatusDetail(depthOne ? "Depth-1 extraction enabled — this may take a few minutes for larger sites." : "");
-      startStatusSequence(buildExtractionStatusSequence(depthOne), 3000);
+      if (ucasHint) setStatusDetail("Static catalog extraction");
+      startStatusSequence(
+        ucasHint ? buildUcasStatusSequence() : buildExtractionStatusSequence(depthOne),
+        3000,
+      );
     } catch (progressError) {
       stopStatusSequence();
       if (debugOnly) console.warn("Could not start extraction progress messages.", progressError);
@@ -1313,7 +1416,22 @@ async function runExtractionWithSession(request) {
 
     requestAttempted = true;
     const result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
-    const responseMode = catalogMode ? "catalog" : "audit";
+    const ucasConfirmed = isUcasResponse(result);
+    const ucasDiagnostics = getUcasDiagnostics(result);
+    const responseMode = ucasConfirmed ? "ucas" : catalogMode ? "catalog" : "audit";
+
+    currentUcasModeConfirmed = ucasConfirmed;
+    updateUcasModeStatus({
+      active: ucasConfirmed,
+      diagnostics: ucasDiagnostics,
+    });
+
+    if (ucasConfirmed) {
+      stopStatusSequence();
+      setStatusDetail("Static catalog extraction");
+      showStatus("Validating UCAS rows", 88);
+    }
+
     const finalRows = getFinalRowsFromResponse(result, responseMode);
 
     debugState.backend.frontendFinalRowCount = finalRows.length;
@@ -1322,7 +1440,9 @@ async function runExtractionWithSession(request) {
       finalRows: finalRows.length,
     });
 
-    if (responseMode === "catalog") {
+    if (responseMode === "ucas") {
+      programs = normalizeUcasRows(finalRows);
+    } else if (responseMode === "catalog") {
       programs = normalizeCatalogRows(finalRows);
     } else {
       programs = finalRows;
@@ -1339,6 +1459,18 @@ async function runExtractionWithSession(request) {
       }
 
       const diagnostics = getResponseDiagnostics(result);
+      if (ucasConfirmed && hasUcasSecurityPage(result)) {
+        hideStatus();
+        return showWarning(getUcasSecurityWarning(false));
+      }
+
+      if (ucasConfirmed && isIncompleteUcasResponse(result)) {
+        hideStatus();
+        return showWarning(
+          "UCAS extraction incomplete. No validated rows were returned; check diagnostics before treating this run as complete."
+        );
+      }
+
       const candidatesFound = Math.max(
         Number(diagnostics.candidateCount || 0),
         Number(result?.discoveredProgrammeCount || 0),
@@ -1358,16 +1490,22 @@ async function runExtractionWithSession(request) {
       return;
     }
 
-    if (isPartialResponse(result)) {
+    if (ucasConfirmed && hasUcasSecurityPage(result)) {
+      showWarning(getUcasSecurityWarning(true));
+    } else if (ucasConfirmed && isIncompleteUcasResponse(result)) {
+      showWarning(
+        "UCAS extraction incomplete — check diagnostics. Rows already extracted are shown below, but this run should not be treated as complete."
+      );
+    } else if (isPartialResponse(result)) {
       showWarning(depthOne
         ? "Partial Depth-1 result returned. Some detail pages used fallback listing data, but usable rows were extracted."
         : "Partial result returned. Some detail pages may have failed or timed out, but usable data was extracted.");
     }
 
     stopStatusSequence();
-    showStatus("Preparing results...", 90);
+    showStatus(ucasConfirmed ? "Preparing UCAS catalog" : "Preparing results...", 90);
 
-    if (responseMode !== "catalog") {
+    if (responseMode === "audit") {
       programs = programs.map(p => {
         p = mapSubjects(p);
         p = applyFinancialAidStatement(p);
@@ -1375,7 +1513,7 @@ async function runExtractionWithSession(request) {
       });
     }
 
-    showStatus("Building table output...", 96);
+    showStatus(ucasConfirmed ? "Checking for missing course data" : "Building table output...", 96);
     activeResultsMode = responseMode;
     currentResultMode = responseMode;
 
@@ -1392,7 +1530,10 @@ async function runExtractionWithSession(request) {
     await sleep(250);
     renderResults(url);
     if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
-    showStatus("Finalising diagnostics...", 100);
+    showStatus(
+      ucasConfirmed ? "Finalizing deterministic UCAS results" : "Finalising diagnostics...",
+      100,
+    );
     await sleep(100);
     hideStatus();
   } catch (error) {
@@ -1476,14 +1617,70 @@ function buildExtractionStatusSequence(depthOne) {
   }));
 }
 
+function buildUcasStatusSequence() {
+  const phrases = [
+    "UCAS mode active",
+    "Fetching UCAS search results",
+    "Reading UCAS listing page",
+    "Checking UCAS pagination",
+    "Collecting course links",
+    "Parsing UCAS course cards",
+    "Fetching next UCAS results page",
+    "Reconciling UCAS result count",
+    "Fetching course fee pages",
+    "Reading Fees and funding sections",
+    "Validating UCAS rows",
+    "Checking for missing course data",
+    "Preparing UCAS catalog",
+    "Finalizing deterministic UCAS results",
+  ];
+
+  return phrases.map((text, index) => ({
+    text,
+    progress: Math.min(86, Math.round(6 + (index / Math.max(1, phrases.length - 1)) * 80)),
+  }));
+}
+
+function isIncompleteUcasResponse(result) {
+  if (!isUcasResponse(result)) return false;
+  const diagnostics = getUcasDiagnostics(result);
+  return Boolean(
+    diagnostics.ucasComplete === false ||
+    diagnostics.partial === true ||
+    hasUcasSecurityPage(result)
+  );
+}
+
+function getUcasSecurityWarning(hasRows) {
+  const rowMessage = hasRows
+    ? "Rows already extracted are shown below, but this run should not be treated as complete."
+    : "No validated rows were extracted, and this run should not be treated as complete.";
+
+  return [
+    "UCAS security/block page detected. Static fetch could not read this page.",
+    "UCAS extraction may be incomplete because one or more pages returned a security/check page.",
+    rowMessage,
+  ].join(" ");
+}
+
 function isPartialResponse(result) {
-  return Boolean(result?.frontendDiagnostics?.partial ?? result?.partial);
+  const diagnostics = getUcasDiagnostics(result);
+  const partial =
+    result?.frontendDiagnostics?.partial ??
+    result?.diagnostics?.partial ??
+    result?.partial;
+  return Boolean(
+    partial ||
+    diagnostics.ucasComplete === false ||
+    hasUcasSecurityPage(result)
+  );
 }
 
 function getResponseDiagnostics(data) {
   const frontend = data?.frontendDiagnostics || {};
   const diagnostics = data?.diagnostics || {};
   return {
+    ...getUcasDiagnostics(data),
     extractDetailsRequested:
       frontend.extractDetailsRequested ?? diagnostics.extractDetailsRequested,
     normalExtractionAttempted:
@@ -1951,6 +2148,31 @@ function renderDebugPanel(forceVisible = false) {
     ["Depth-1 status", diagnostics.depthOneStatus || "not_requested"],
     ["Partial result", formatYesNo(diagnostics.partial)],
     ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
+    ["UCAS mode", formatYesNo(diagnostics.ucasMode ?? diagnostics.ucasDetected)],
+    ["UCAS complete", formatYesNo(diagnostics.ucasComplete)],
+    ["Static only", formatYesNo(diagnostics.staticOnly)],
+    ["LLM used", formatYesNo(diagnostics.llmUsed)],
+    ["Playwright used", formatYesNo(diagnostics.playwrightUsed)],
+    ["Expected UCAS results", diagnostics.expectedResultCount],
+    ["UCAS rows output", diagnostics.rowsOutput],
+    ["Unique UCAS courses", diagnostics.uniqueCourses],
+    ["Listing pages fetched", diagnostics.listingPagesFetched],
+    ["Listing pages expected", diagnostics.listingPagesExpected],
+    ["Pagination stopped reason", diagnostics.paginationStoppedReason],
+    ["Fees found", diagnostics.feeFoundCount],
+    ["No fee provided", diagnostics.noFeeProvidedCount],
+    ["Fee option required", diagnostics.optionRequiredCount],
+    ["Fee fetch failed", diagnostics.feeFetchFailedCount],
+    ["Fee parse failed", diagnostics.feeParseFailedCount],
+    ["Security page detected", formatYesNo(diagnostics.securityPageDetected)],
+    ["Blocked page count", diagnostics.blockedPageCount],
+    ["Blocked page type", diagnostics.blockedPageType],
+    [
+      "Blocked page URLs",
+      Array.isArray(diagnostics.blockedPageUrls)
+        ? diagnostics.blockedPageUrls.join(", ")
+        : diagnostics.blockedPageUrls,
+    ],
     ["Appended seed URLs", appendedSeedUrls.length > 1 ? appendedSeedUrls.length : ""],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
 
@@ -2710,6 +2932,12 @@ function appendUniqueRows(existingRows, incomingRows, mode) {
 }
 
 function getRowDedupeKey(row, mode) {
+  if (mode === "ucas") {
+    const url = firstTrimmedValue(row?.courseUrl, row?.program_url, row?.programme_url, row?.url);
+    if (url) return `url:${normalizeDedupeUrl(url)}`;
+    return `name:${firstTrimmedValue(row?.programName, row?.program_name, row?.programme_name)}|${firstTrimmedValue(row?.universityProvider, row?.provider_name, row?.university_name)}`;
+  }
+
   if (mode === "catalog") {
     const url = firstTrimmedValue(row?.courseUrl, row?.course_url, row?.courseLink, row?.url);
     if (url) return `url:${normalizeDedupeUrl(url)}`;
@@ -2780,7 +3008,11 @@ function formatCatalogFeeDisplay(value) {
 }
 
 function isCatalogResults() {
-  return activeResultsMode === "catalog";
+  return activeResultsMode === "catalog" || activeResultsMode === "ucas";
+}
+
+function isUcasResults() {
+  return activeResultsMode === "ucas";
 }
 
 function renderResults(sourceUrl) {
@@ -2789,9 +3021,19 @@ function renderResults(sourceUrl) {
   sourcePill.textContent = appendedSeedUrls.length > 1
     ? `${appendedSeedUrls.length} seed URLs`
     : host;
-  if (countLabel) countLabel.textContent = isCatalogResults() ? "catalog rows found from" : "programs found from";
+  if (countLabel) {
+    countLabel.textContent = isUcasResults()
+      ? "UCAS rows found from"
+      : isCatalogResults()
+        ? "catalog rows found from"
+        : "programs found from";
+  }
   filterBar?.classList.toggle("hidden", isCatalogResults());
-  noResults.textContent = isCatalogResults() ? "No catalog rows to display." : "No programs match your filters.";
+  noResults.textContent = isUcasResults()
+    ? "No UCAS rows to display."
+    : isCatalogResults()
+      ? "No catalog rows to display."
+      : "No programs match your filters.";
   setResultsTableMode(activeResultsMode);
   resultsSection.classList.remove("hidden");
   applyFiltersAndRender();
@@ -2807,7 +3049,11 @@ function renderResults(sourceUrl) {
 function applyFiltersAndRender() {
   if (isCatalogResults()) {
     resultCount.textContent = allPrograms.length;
-    renderCatalogTable(allPrograms);
+    if (isUcasResults()) {
+      renderUcasTable(allPrograms);
+    } else {
+      renderCatalogTable(allPrograms);
+    }
     return;
   }
 
@@ -2842,12 +3088,15 @@ function applyFiltersAndRender() {
 
 function setResultsTableMode(mode) {
   if (!tableHeaderRow) return;
-  const nextMode = mode === "catalog" ? "catalog" : "audit";
+  const nextMode = mode === "ucas" ? "ucas" : mode === "catalog" ? "catalog" : "audit";
   if (tableHeaderRow.dataset.mode === nextMode) return;
 
-  tableHeaderRow.innerHTML = nextMode === "catalog"
-    ? CATALOG_TABLE_HEADER_HTML
-    : AUDIT_TABLE_HEADER_HTML;
+  tableHeaderRow.innerHTML =
+    nextMode === "ucas"
+      ? UCAS_TABLE_HEADER_HTML
+      : nextMode === "catalog"
+        ? CATALOG_TABLE_HEADER_HTML
+        : AUDIT_TABLE_HEADER_HTML;
   tableHeaderRow.dataset.mode = nextMode;
   bindSortableHeaders();
 }
@@ -2913,8 +3162,36 @@ function renderCatalogTable(rows) {
   `).join("");
 }
 
+function renderUcasTable(rows) {
+  if (rows.length === 0) {
+    tableBody.innerHTML = "";
+    noResults.classList.remove("hidden");
+    return;
+  }
+  noResults.classList.add("hidden");
+
+  tableBody.innerHTML = rows.map((row, i) => `
+    <tr>
+      <td class="col-num">${i + 1}</td>
+      <td class="name-cell">${catalogCell(row.programName)}</td>
+      <td>${catalogCell(row.universityProvider)}</td>
+      <td>${catalogCell(row.ucasPoints)}</td>
+      <td>${catalogCell(row.fee)}</td>
+      <td>${catalogCell(row.feeStatus)}</td>
+      <td>${catalogCell(row.qualification)}</td>
+      <td>${catalogCell(row.studyMode)}</td>
+      <td>${catalogCell(row.duration)}</td>
+      <td>${catalogCell(row.startDate)}</td>
+      <td>${catalogCell(row.location)}</td>
+      <td class="catalog-url-cell">${catalogUrlCell(row.courseUrl)}</td>
+    </tr>
+  `).join("");
+}
+
 function catalogCell(value) {
-  return value ? esc(value) : '<span class="nil">-</span>';
+  return value === 0 || (value !== undefined && value !== null && String(value).trim() !== "")
+    ? esc(value)
+    : '<span class="nil">-</span>';
 }
 
 function catalogUrlCell(value) {
@@ -3187,14 +3464,17 @@ bindSortableHeaders();
 //Export CSV
 exportBtn.addEventListener("click", () => {
   if (!allPrograms.length) return;
-  const cols = isCatalogResults() ? CATALOG_CSV_COLUMNS : AUDIT_CSV_COLUMNS;
+  const columns = isUcasResults()
+    ? UCAS_CSV_COLUMNS
+    : (isCatalogResults() ? CATALOG_CSV_COLUMNS : AUDIT_CSV_COLUMNS)
+        .map(key => [key, key]);
   const rows = [
-    cols.join(","),
+    columns.map(([label]) => `"${String(label).replace(/"/g, '""')}"`).join(","),
     ...allPrograms.map(p =>
-      cols.map(c => {
+      columns.map(([, key]) => {
         // Strip HTML tags from description for CSV readability
-        let val = String(p[c] ?? "");
-        if (c === "description") val = val.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        let val = String(p[key] ?? "");
+        if (key === "description") val = val.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
         return `"${val.replace(/"/g, '""')}"`;
       }).join(",")
     ),
@@ -3202,7 +3482,7 @@ exportBtn.addEventListener("click", () => {
   const blob = new Blob([rows.join("\n")], { type: "text/csv" });
   const a    = document.createElement("a");
   a.href     = URL.createObjectURL(blob);
-  const exportType = isCatalogResults() ? "catalog" : "audit";
+  const exportType = isUcasResults() ? "ucas" : isCatalogResults() ? "catalog" : "audit";
   a.download = `uniscrape-${exportType}_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 });
@@ -3212,11 +3492,13 @@ clearBtn.addEventListener("click", () => {
   allPrograms = [];
   activeResultsMode = "audit";
   currentResultMode = null;
+  currentUcasModeConfirmed = false;
   appendedSeedUrls = [];
   resetAppendMode({ clearStatus: true });
   sortCol = null;
   sortDir = 1;
   urlInput.value = "";
+  updateUcasModeStatus({ active: false });
   setResultsTableMode("audit");
   filterBar?.classList.remove("hidden");
   if (countLabel) countLabel.textContent = "programs found from";
