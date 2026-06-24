@@ -1443,7 +1443,7 @@ async function runExtractionWithSession(request) {
 
   try {
     try {
-      setStatusDetail(depthOne ? "Depth-1 extraction enabled — this may take a few minutes for larger sites." : "");
+      setStatusDetail(depthOne ? "Depth-1 extraction enabled - this may take a few minutes for larger sites." : "");
       if (ucasHint) setStatusDetail("Static catalog extraction");
       startStatusSequence(
         ucasHint ? buildUcasStatusSequence() : buildExtractionStatusSequence(depthOne),
@@ -1534,7 +1534,7 @@ async function runExtractionWithSession(request) {
       showWarning(getUcasSecurityWarning(true));
     } else if (ucasConfirmed && isIncompleteUcasResponse(result)) {
       showWarning(
-        "UCAS extraction incomplete — check diagnostics. Rows already extracted are shown below, but this run should not be treated as complete."
+        "UCAS extraction incomplete - check diagnostics. Rows already extracted are shown below, but this run should not be treated as complete."
       );
     } else if (isPartialResponse(result)) {
       showWarning(depthOne
