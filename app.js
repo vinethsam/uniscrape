@@ -1217,6 +1217,46 @@ function updateDebugStateFromBackend(data) {
   debugState.renderApi.finalSource = data.source || "backend";
 }
 
+installScopedZoomGuard();
+
+function installScopedZoomGuard() {
+  // Browser support note: Safari exposes pinch as gesture* events, while
+  // Chromium-based browsers often expose trackpad pinch as ctrl+wheel. Keep this
+  // scoped to the UniScrape shell instead of using user-scalable=no, so normal
+  // scrolling, text selection, keyboard navigation, and browser menu zoom remain
+  // available.
+  const shellSelectors = [".header-wrap", "main", ".footer-wrap"];
+
+  const getShells = () => shellSelectors
+    .map(selector => document.querySelector(selector))
+    .filter(Boolean);
+
+  const eventStartedInShell = event => {
+    const shells = getShells();
+    if (!shells.length) return false;
+
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    if (path.length) return shells.some(shell => path.includes(shell));
+
+    const target = event.target;
+    return target instanceof Node && shells.some(shell => shell.contains(target));
+  };
+
+  const preventShellGestureZoom = event => {
+    if (!eventStartedInShell(event)) return;
+    if (event.cancelable) event.preventDefault();
+  };
+
+  ["gesturestart", "gesturechange", "gestureend"].forEach(type => {
+    document.addEventListener(type, preventShellGestureZoom, { capture: true, passive: false });
+  });
+
+  document.addEventListener("wheel", event => {
+    if (!event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    preventShellGestureZoom(event);
+  }, { capture: true, passive: false });
+}
+
 // Main flow
 scrapeBtn?.addEventListener("click", handleExtractClick);
 retryBtn?.addEventListener("click", () => { clearError(); handleExtractClick(); });
