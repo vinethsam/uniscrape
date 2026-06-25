@@ -4,6 +4,7 @@
 
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/crawl";
+const UCAS_JOBS_API_URL = new URL("/ucas/jobs", EXTRACT_API_URL).toString();
 const FRONTEND_BUILD_MARKER = "frontend_response_parser_trace_v1";
 console.debug("[uniscrape] frontend build", FRONTEND_BUILD_MARKER);
 
@@ -37,6 +38,10 @@ const ADMIN_APPROVE_URL = "https://api.uniscrape.com/admin/approve";
 const ADMIN_REJECT_URL = "https://api.uniscrape.com/admin/reject";
 const GOOGLE_CLIENT_ID = "658260663487-sng89uf5tvo0t6915bemcrjl8fb7mchs.apps.googleusercontent.com";
 const EXTRACT_TIMEOUT_MS = 300000;
+const UCAS_JOB_REQUEST_TIMEOUT_MS = 30000;
+const UCAS_JOB_RUNNING_POLL_MS = 4000;
+const UCAS_JOB_WAITING_POLL_MIN_MS = 10000;
+const UCAS_JOB_WAITING_POLL_MAX_MS = 30000;
 const VERIFY_ACCESS_TIMEOUT_MS = 15000;
 const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
 const LEGACY_UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
@@ -81,6 +86,7 @@ let pendingPollInterval = null;
 let pendingScrapeAction = null;
 let googleIdentityInitialized = false;
 let signInSucceededThisAttempt = false;
+let activeUcasJob = null;
 
 let debugState = {
   rawHtml: "",
@@ -134,6 +140,8 @@ const statusSection    = document.getElementById("statusSection");
 const statusText       = document.getElementById("statusText");
 const statusDetail     = document.getElementById("statusDetail");
 const progressFill     = document.getElementById("progressFill");
+const ucasJobActions   = document.getElementById("ucasJobActions");
+const ucasJobCancelBtn = document.getElementById("ucasJobCancelBtn");
 const errorSection     = document.getElementById("errorSection");
 const errorText        = document.getElementById("errorText");
 const retryBtn         = document.getElementById("retryBtn");
@@ -186,6 +194,7 @@ const accessCodeCancel = document.getElementById("accessCodeCancel");
 const accessCodeError = document.getElementById("accessCodeError");
 const countLabel = document.querySelector(".count-label");
 const filterBar = document.querySelector(".filter-bar");
+const programTable = document.getElementById("programTable");
 const tableHeaderRow = document.querySelector("#programTable thead tr");
 const databasesPage = document.getElementById("databasesPage");
 const databasesNavLink = document.querySelector('.settings-nav-link[href="/databases"]');
@@ -237,11 +246,11 @@ const CATALOG_TABLE_HEADER_HTML = `
 const UCAS_TABLE_HEADER_HTML = `
   <th class="col-num">#</th>
   <th>Programme Name</th>
+  <th>Award / Qualification</th>
   <th>University / Provider</th>
   <th>UCAS Points</th>
   <th>Fee</th>
   <th>Fee Status / Fee Type</th>
-  <th>Qualification</th>
   <th>Study Mode</th>
   <th>Duration</th>
   <th>Start Date</th>
@@ -279,6 +288,7 @@ const CATALOG_CSV_COLUMNS = [
 
 const UCAS_CSV_COLUMNS = [
   ["Programme Name", "programName"],
+  ["Award / Qualification", "qualification"],
   ["University / Provider", "universityProvider"],
   ["UCAS Points", "ucasPoints"],
   ["UCAS Points Min", "ucasPointsMin"],
@@ -287,7 +297,6 @@ const UCAS_CSV_COLUMNS = [
   ["Fee Status", "feeStatus"],
   ["International Fee", "internationalFee"],
   ["Home Fee", "homeFee"],
-  ["Qualification", "qualification"],
   ["Study Mode", "studyMode"],
   ["Duration", "duration"],
   ["Start Date", "startDate"],
@@ -1084,20 +1093,52 @@ function buildBackendExtractPayload(url, debugOnly, catalogMode = false, depthOn
   return payload;
 }
 
-async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, depthOne = false) {
+function getSessionTokenOrThrow() {
   const sessionToken = String(currentSession.token || "").trim();
-
   if (!sessionToken) {
     const error = new Error("Your session has expired. Please sign in again.");
     error.code = "SESSION_AUTH_REQUIRED";
     throw error;
   }
 
-  const payload = buildBackendExtractPayload(url, debugOnly, catalogMode, depthOne);
-  const headers = {
+  return sessionToken;
+}
+
+function buildAuthorizedJsonHeaders() {
+  return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${sessionToken}`,
+    Authorization: `Bearer ${getSessionTokenOrThrow()}`,
   };
+}
+
+async function readJsonResponse(res) {
+  return res.json().catch(() => null);
+}
+
+function createUcasJobUnavailableError(message = "UCAS job route is unavailable.") {
+  const error = new Error(message);
+  error.code = "UCAS_JOB_ROUTE_UNAVAILABLE";
+  return error;
+}
+
+function isUcasJobUnavailableError(error) {
+  return error?.code === "UCAS_JOB_ROUTE_UNAVAILABLE";
+}
+
+function readBackendAuthError(res, data, fallbackMessage) {
+  const backendDetail = String(data?.detail || data?.message || "");
+  if (res.status === 401 || res.status === 403) {
+    const error = new Error(backendDetail || fallbackMessage || "Your session is not authorised for extraction.");
+    error.code = /password|access code/i.test(backendDetail)
+      ? "EXTRACTION_AUTH_REJECTED"
+      : "SESSION_AUTH_REQUIRED";
+    throw error;
+  }
+}
+
+async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, depthOne = false) {
+  const payload = buildBackendExtractPayload(url, debugOnly, catalogMode, depthOne);
+  const headers = buildAuthorizedJsonHeaders();
 
   console.debug("[uniscrape] extraction request", {
     apiUrl: EXTRACT_API_URL,
@@ -1118,7 +1159,7 @@ async function sendBackendExtractRequest(url, debugOnly, catalogMode = false, de
 }
 
 async function readBackendExtractResponse(res) {
-  const data = await res.json().catch(() => null);
+  const data = await readJsonResponse(res);
 
   console.debug("[uniscrape] raw response row fields", {
     backendPatch: data?.responseMeta?.backendPatch,
@@ -1142,13 +1183,7 @@ async function readBackendExtractResponse(res) {
     );
   }
 
-  if (res.status === 401 || res.status === 403) {
-    const error = new Error(backendDetail || "Your session is not authorised for extraction.");
-    error.code = /password|access code/i.test(backendDetail)
-      ? "EXTRACTION_AUTH_REJECTED"
-      : "SESSION_AUTH_REQUIRED";
-    throw error;
-  }
+  readBackendAuthError(res, data, "Your session is not authorised for extraction.");
 
   const hasUsablePartialUcasRows =
     isUcasResponse(data) &&
@@ -1180,6 +1215,642 @@ async function readBackendExtractResponse(res) {
 async function useBackendExtract(url, debugOnly, catalogMode = false, depthOne = false) {
   const res = await sendBackendExtractRequest(url, debugOnly, catalogMode, depthOne);
   return readBackendExtractResponse(res);
+}
+
+function buildUcasJobPayload(url, debugOnly) {
+  return {
+    url,
+    debug: debugOnly,
+    extractionMode: "catalog",
+  };
+}
+
+function getJobIdFromPayload(payload) {
+  return firstTrimmedValue(
+    payload?.job_id,
+    payload?.jobId,
+    payload?.id,
+    payload?.job?.job_id,
+    payload?.job?.jobId,
+    payload?.job?.id,
+  );
+}
+
+function getUcasJobUrl(jobId, suffix = "") {
+  const encodedJobId = encodeURIComponent(jobId);
+  return `${UCAS_JOBS_API_URL}/${encodedJobId}${suffix}`;
+}
+
+async function startUcasJob(url, debugOnly) {
+  const payload = buildUcasJobPayload(url, debugOnly);
+  let res;
+  try {
+    res = await fetch(UCAS_JOBS_API_URL, {
+      method: "POST",
+      headers: buildAuthorizedJsonHeaders(),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(UCAS_JOB_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" || error instanceof TypeError) {
+      throw createUcasJobUnavailableError("UCAS job route could not be reached.");
+    }
+    throw error;
+  }
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for UCAS extraction.");
+
+  if ([404, 405, 501].includes(res.status)) {
+    throw createUcasJobUnavailableError(data?.detail || "UCAS job route is unavailable.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "UCAS job could not be started with HTTP " + res.status);
+  }
+
+  const jobId = getJobIdFromPayload(data);
+  if (!jobId) {
+    throw createUcasJobUnavailableError("UCAS job route did not return a job id.");
+  }
+
+  return { ...data, job_id: jobId };
+}
+
+async function fetchUcasJobStatus(jobId) {
+  const res = await fetch(getUcasJobUrl(jobId), {
+    method: "GET",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UCAS_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for UCAS extraction.");
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "UCAS job status failed with HTTP " + res.status);
+  }
+
+  return { ...data, job_id: getJobIdFromPayload(data) || jobId };
+}
+
+async function fetchUcasJobResults(jobId) {
+  const res = await fetch(getUcasJobUrl(jobId, "/results"), {
+    method: "GET",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UCAS_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for UCAS extraction.");
+
+  if ([404, 405, 501].includes(res.status)) return null;
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "UCAS job results failed with HTTP " + res.status);
+  }
+
+  return data;
+}
+
+function getObjectSources(value) {
+  const sources = [];
+  const add = item => {
+    if (item && typeof item === "object" && !Array.isArray(item) && !sources.includes(item)) {
+      sources.push(item);
+    }
+  };
+
+  add(value);
+  add(value?.job);
+  add(value?.data);
+  add(value?.status);
+  add(value?.progress);
+  add(value?.metrics);
+  add(value?.stats);
+  add(value?.diagnostics);
+  add(value?.data?.job);
+  add(value?.data?.progress);
+  add(value?.data?.metrics);
+  add(value?.data?.stats);
+  add(value?.data?.diagnostics);
+
+  return sources;
+}
+
+function firstPresentValue(...values) {
+  return values.find(value =>
+    value === 0 || value === false || (value !== undefined && value !== null && String(value).trim() !== "")
+  );
+}
+
+function firstJobValue(payloads, keys) {
+  const sources = payloads.flatMap(getObjectSources);
+  for (const source of sources) {
+    for (const key of keys) {
+      const value = source[key];
+      if (value === 0 || value === false || (value !== undefined && value !== null && String(value).trim() !== "")) {
+        return value;
+      }
+    }
+  }
+  return undefined;
+}
+
+function normalizeUcasJobStatus(value) {
+  const status = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    completed: "complete",
+    success: "complete",
+    succeeded: "complete",
+    done: "complete",
+    canceled: "cancelled",
+    canceling: "cancelled",
+    retry_wait: "waiting",
+    backoff: "waiting",
+    rate_limit: "rate_limited",
+    rate_limited_wait: "rate_limited",
+  };
+  return aliases[status] || status || "running";
+}
+
+function getUcasJobStatus(payloads) {
+  return normalizeUcasJobStatus(firstJobValue(payloads, [
+    "status",
+    "state",
+    "job_status",
+    "jobStatus",
+  ]));
+}
+
+function isUcasJobTerminal(status) {
+  return ["complete", "failed", "cancelled"].includes(normalizeUcasJobStatus(status));
+}
+
+function isUcasJobWaiting(status, payloads) {
+  const normalizedStatus = normalizeUcasJobStatus(status);
+  if (["waiting", "rate_limited", "paused"].includes(normalizedStatus)) return true;
+
+  const waitingValue = firstJobValue(payloads, [
+    "waiting",
+    "rate_limited",
+    "rateLimited",
+    "is_waiting",
+    "isWaiting",
+  ]);
+  return waitingValue === true || String(waitingValue).toLowerCase() === "true";
+}
+
+function sanitizeUcasProgressText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/\b(playwright|browser rendering|accordion|accordions|ai|model api|openrouter|model json|llm)\b/i.test(text)) {
+    return "";
+  }
+  return text;
+}
+
+function humanizeUcasPhase(value, status = "") {
+  const cleaned = sanitizeUcasProgressText(value);
+  const phase = cleaned.toLowerCase().replace(/[\s-]+/g, "_");
+  const normalizedStatus = normalizeUcasJobStatus(status);
+
+  if (normalizedStatus === "queued") return "UCAS job queued";
+  if (normalizedStatus === "complete") return "UCAS extraction complete";
+  if (normalizedStatus === "failed") return "UCAS extraction failed";
+  if (normalizedStatus === "cancelled") return "UCAS extraction cancelled";
+  if (normalizedStatus === "rate_limited" || phase.includes("rate")) {
+    return "UCAS rate-limit detected - waiting before retry";
+  }
+  if (normalizedStatus === "waiting" || phase.includes("wait") || phase.includes("backoff")) {
+    return "UCAS is waiting before retry";
+  }
+  if (phase.includes("fee") && phase.includes("fund")) return "Reading Fees and funding sections";
+  if (phase.includes("fee")) return "Fetching UCAS fee pages";
+  if (phase.includes("pagination")) return "Checking UCAS pagination";
+  if (phase.includes("link")) return "Collecting UCAS course links";
+  if (phase.includes("listing") || phase.includes("search")) return "Fetching UCAS listing pages";
+  if (phase.includes("save")) return "Saving UCAS progress";
+  if (phase.includes("resume")) return "Resuming UCAS extraction";
+  if (phase.includes("validat")) return "Validating UCAS completeness";
+  if (phase.includes("catalog") || phase.includes("prepar")) return "Preparing UCAS catalog";
+
+  return cleaned || "Fetching UCAS listing pages";
+}
+
+function getUcasJobPhase(payloads, status) {
+  return humanizeUcasPhase(firstJobValue(payloads, [
+    "phase",
+    "current_phase",
+    "currentPhase",
+    "stage",
+    "step",
+    "message",
+  ]), status);
+}
+
+function getUcasJobExpectedCount(payloads) {
+  return firstJobValue(payloads, [
+    "expected_count",
+    "expectedCount",
+    "expected_result_count",
+    "expectedResultCount",
+    "total",
+    "total_count",
+    "totalCount",
+    "uniqueCourses",
+  ]);
+}
+
+function getUcasJobRowsCollected(payloads, fallbackRows = 0) {
+  return firstPresentValue(firstJobValue(payloads, [
+    "rows_collected",
+    "rowsCollected",
+    "rows_output",
+    "rowsOutput",
+    "result_count",
+    "resultCount",
+    "completed_rows",
+    "completedRows",
+  ]), fallbackRows);
+}
+
+function formatUcasRetryTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  return text;
+}
+
+function formatUcasJobProgressDetail(payloads, rowsLength) {
+  const status = getUcasJobStatus(payloads);
+  const phase = getUcasJobPhase(payloads, status);
+  const expectedCount = getUcasJobExpectedCount(payloads);
+  const rowsCollected = getUcasJobRowsCollected(payloads, rowsLength);
+  const listingPagesFetched = firstJobValue(payloads, ["listing_pages_fetched", "listingPagesFetched"]);
+  const feePagesCompleted = firstJobValue(payloads, ["fee_pages_completed", "feePagesCompleted", "feeFoundCount"]);
+  const feePagesRemaining = firstJobValue(payloads, ["fee_pages_remaining", "feePagesRemaining"]);
+  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
+  const eta = firstJobValue(payloads, ["estimated_remaining_time", "estimatedRemainingTime", "eta", "eta_seconds", "etaSeconds"]);
+
+  const parts = [
+    `Status: ${status.replace(/_/g, " ")}`,
+    phase ? `Phase: ${phase}` : "",
+    expectedCount !== undefined
+      ? `Rows: ${rowsCollected || 0} / ${expectedCount}`
+      : `Rows: ${rowsCollected || 0}`,
+    listingPagesFetched !== undefined ? `Listing pages fetched: ${listingPagesFetched}` : "",
+    feePagesCompleted !== undefined ? `Fee pages completed: ${feePagesCompleted}` : "",
+    feePagesRemaining !== undefined ? `Fee pages remaining: ${feePagesRemaining}` : "",
+    nextRetryAt ? `Next retry: ${formatUcasRetryTime(nextRetryAt)}` : "",
+    eta ? `Estimated remaining: ${eta}` : "",
+  ].filter(Boolean);
+
+  return parts.join(" | ");
+}
+
+function getUcasJobProgressPercent(payloads, rowsLength) {
+  const explicitProgress = Number(firstJobValue(payloads, [
+    "progress_percent",
+    "progressPercent",
+    "percent",
+    "percentage",
+  ]));
+  if (Number.isFinite(explicitProgress) && explicitProgress >= 0) {
+    return Math.min(100, explicitProgress);
+  }
+
+  const status = getUcasJobStatus(payloads);
+  if (status === "queued") return 12;
+  if (status === "complete") return 100;
+  if (status === "failed" || status === "cancelled") return Math.max(lastStatusProgress, rowsLength ? 88 : 40);
+
+  const expectedCount = Number(getUcasJobExpectedCount(payloads));
+  if (Number.isFinite(expectedCount) && expectedCount > 0) {
+    return Math.min(92, Math.max(16, Math.round((rowsLength / expectedCount) * 82)));
+  }
+
+  return isUcasJobWaiting(status, payloads)
+    ? Math.max(lastStatusProgress, 45)
+    : Math.max(lastStatusProgress, 26);
+}
+
+function getUcasPollDelay(payloads) {
+  const status = getUcasJobStatus(payloads);
+  if (!isUcasJobWaiting(status, payloads)) return UCAS_JOB_RUNNING_POLL_MS;
+
+  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
+  if (nextRetryAt) {
+    const retryMs = new Date(nextRetryAt).getTime();
+    if (Number.isFinite(retryMs)) {
+      const delayMs = retryMs - Date.now() + 500;
+      return Math.min(
+        UCAS_JOB_WAITING_POLL_MAX_MS,
+        Math.max(UCAS_JOB_WAITING_POLL_MIN_MS, delayMs),
+      );
+    }
+  }
+
+  return UCAS_JOB_WAITING_POLL_MIN_MS;
+}
+
+function collectUcasRowsFromPayload(payload, depth = 0) {
+  if (!payload || depth > 3) return [];
+  if (Array.isArray(payload)) return payload;
+  if (typeof payload !== "object") return [];
+
+  const directRows = getFinalRowsFromResponse(payload, "ucas");
+  if (directRows.length) return directRows;
+
+  const directKeys = [
+    "partialRows",
+    "partial_rows",
+    "resultRows",
+    "result_rows",
+    "courses",
+    "records",
+    "items",
+  ];
+  for (const key of directKeys) {
+    if (Array.isArray(payload[key]) && payload[key].length) return payload[key];
+  }
+
+  const nestedKeys = ["results", "result", "data", "payload", "job"];
+  for (const key of nestedKeys) {
+    const nestedRows = collectUcasRowsFromPayload(payload[key], depth + 1);
+    if (nestedRows.length) return nestedRows;
+  }
+
+  return [];
+}
+
+function getBestUcasRowsFromPayloads(...payloads) {
+  for (const payload of payloads) {
+    const rows = collectUcasRowsFromPayload(payload);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function collectUcasWarnings(...payloads) {
+  const warnings = [];
+  payloads.forEach(payload => {
+    if (!payload || typeof payload !== "object") return;
+    [
+      payload.warnings,
+      payload.warning,
+      payload.diagnostics?.warnings,
+      payload.frontendDiagnostics?.warnings,
+      payload.data?.warnings,
+      payload.data?.diagnostics?.warnings,
+    ].forEach(value => {
+      if (Array.isArray(value)) warnings.push(...value);
+      else if (value) warnings.push(value);
+    });
+  });
+
+  return [...new Set(warnings.map(value => String(value)).filter(Boolean))];
+}
+
+function buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl) {
+  const payloads = [statusPayload, resultsPayload].filter(Boolean);
+  const statusDiagnostics = getUcasDiagnostics(statusPayload);
+  const resultsDiagnostics = getUcasDiagnostics(resultsPayload);
+  const status = getUcasJobStatus(payloads);
+  const waiting = isUcasJobWaiting(status, payloads);
+  const expectedCount = getUcasJobExpectedCount(payloads);
+  const rowsCollected = getUcasJobRowsCollected(payloads, rows.length);
+  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
+  const feePagesCompleted = firstJobValue(payloads, ["fee_pages_completed", "feePagesCompleted"]);
+  const feePagesRemaining = firstJobValue(payloads, ["fee_pages_remaining", "feePagesRemaining"]);
+
+  return {
+    ...statusDiagnostics,
+    ...resultsDiagnostics,
+    ucasMode: true,
+    ucasDetected: true,
+    staticOnly: true,
+    jobId,
+    jobStatus: status,
+    phase: getUcasJobPhase(payloads, status),
+    expectedResultCount: expectedCount ?? resultsDiagnostics.expectedResultCount ?? statusDiagnostics.expectedResultCount,
+    rowsCollected,
+    rowsOutput: rows.length || resultsDiagnostics.rowsOutput || statusDiagnostics.rowsOutput,
+    listingPagesFetched: firstJobValue(payloads, ["listing_pages_fetched", "listingPagesFetched"]) ?? resultsDiagnostics.listingPagesFetched ?? statusDiagnostics.listingPagesFetched,
+    feePagesCompleted,
+    feePagesRemaining,
+    rateLimited: status === "rate_limited" || waiting,
+    waiting,
+    nextRetryAt,
+    estimatedRemainingTime: firstJobValue(payloads, ["estimated_remaining_time", "estimatedRemainingTime", "eta", "eta_seconds", "etaSeconds"]),
+    sourceUrl,
+    partial: status === "failed" || status === "cancelled" || waiting
+      ? true
+      : (resultsDiagnostics.partial ?? statusDiagnostics.partial),
+    ucasComplete: status === "complete"
+      ? (resultsDiagnostics.ucasComplete ?? statusDiagnostics.ucasComplete ?? true)
+      : (resultsDiagnostics.ucasComplete ?? statusDiagnostics.ucasComplete ?? false),
+  };
+}
+
+function buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, sourceUrl) {
+  const rows = getBestUcasRowsFromPayloads(resultsPayload, statusPayload, latestRows);
+  const diagnostics = buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl);
+  const warnings = collectUcasWarnings(statusPayload, resultsPayload);
+
+  return {
+    catalogRows: rows,
+    rows,
+    diagnostics,
+    warnings,
+    partial: Boolean(diagnostics.partial),
+    responseMeta: {
+      backendPatch: "ucas_jobs",
+      routeName: "ucas_jobs",
+      rowCount: rows.length,
+      jobId,
+    },
+  };
+}
+
+function setUcasJobActionsVisible(isVisible) {
+  ucasJobActions?.classList.toggle("hidden", !isVisible);
+  if (!ucasJobCancelBtn) return;
+  ucasJobCancelBtn.disabled = !isVisible;
+  ucasJobCancelBtn.textContent = "Cancel UCAS job";
+}
+
+function mergeSeedUrls(seedUrls, url) {
+  return [...new Set([...(Array.isArray(seedUrls) ? seedUrls : []), url].filter(Boolean))];
+}
+
+function tagRowsWithMode(rows, mode) {
+  return rows.map(row => {
+    if (!row || typeof row !== "object") return row;
+    const tagged = { ...row };
+    Object.defineProperty(tagged, "__resultMode", {
+      value: mode,
+      enumerable: false,
+      configurable: true,
+    });
+    return tagged;
+  });
+}
+
+function renderUcasJobRows(rawRows, request, baseState, statusPayload, resultsPayload) {
+  const normalizedRows = tagRowsWithMode(normalizeUcasRows(rawRows), "ucas");
+  if (!normalizedRows.length) return;
+
+  const baseRows = Array.isArray(baseState?.rows) ? baseState.rows : [];
+  const baseMode = baseState?.mode || currentResultMode;
+  const displayMode = baseRows.length && baseMode && baseMode !== "ucas" ? baseMode : "ucas";
+
+  if (baseRows.length) {
+    const { rows } = appendUniqueRows(baseRows, normalizedRows, "ucas");
+    allPrograms = rows;
+  } else {
+    allPrograms = normalizedRows;
+  }
+
+  activeResultsMode = displayMode;
+  currentResultMode = displayMode;
+  currentUcasModeConfirmed = true;
+  appendedSeedUrls = mergeSeedUrls(baseState?.seedUrls, request.url);
+  updateUcasModeStatus({ active: true, diagnostics: buildUcasJobDiagnostics("", statusPayload, resultsPayload, rawRows, request.url) });
+
+  renderResults(request.url);
+}
+
+function showUcasJobNotice(payloads, rowsLength) {
+  const status = getUcasJobStatus(payloads);
+
+  if (isUcasJobWaiting(status, payloads)) {
+    showWarning("UCAS is rate-limiting requests. Waiting before retry. Rows collected so far are shown.");
+    return;
+  }
+
+  if (status === "failed") {
+    showWarning(
+      rowsLength
+        ? "UCAS extraction incomplete - review diagnostics before using this as final data."
+        : "UCAS extraction failed. Review diagnostics before retrying."
+    );
+    return;
+  }
+
+  if (status === "cancelled") {
+    showWarning(
+      rowsLength
+        ? "UCAS job cancelled. Rows collected so far are shown."
+        : "UCAS job cancelled before rows were collected."
+    );
+  }
+}
+
+async function runUcasJobExtraction(request, baseState) {
+  const started = await startUcasJob(request.url, request.debugOnly);
+  const jobId = started.job_id;
+  let statusPayload = started;
+  let resultsPayload = null;
+  let latestRows = getBestUcasRowsFromPayloads(statusPayload);
+  let shouldFetchStatus = false;
+
+  activeUcasJob = {
+    jobId,
+    cancelRequested: false,
+  };
+  setUcasJobActionsVisible(true);
+  currentUcasModeConfirmed = true;
+  updateUcasModeStatus({ active: true, diagnostics: { ucasMode: true, staticOnly: true } });
+
+  try {
+    while (true) {
+      if (shouldFetchStatus) {
+        statusPayload = await fetchUcasJobStatus(jobId);
+      }
+      shouldFetchStatus = true;
+
+      try {
+        resultsPayload = await fetchUcasJobResults(jobId);
+      } catch (resultsError) {
+        if (request.debugOnly) console.warn("Could not fetch UCAS job results yet.", resultsError);
+      }
+
+      latestRows = getBestUcasRowsFromPayloads(resultsPayload, statusPayload, latestRows);
+      const payloads = [statusPayload, resultsPayload].filter(Boolean);
+      const status = getUcasJobStatus(payloads);
+      const phase = getUcasJobPhase(payloads, status);
+      const rowsLength = latestRows.length;
+
+      if (rowsLength) {
+        renderUcasJobRows(latestRows, request, baseState, statusPayload, resultsPayload);
+      }
+
+      showStatus(phase, getUcasJobProgressPercent(payloads, rowsLength));
+      setStatusDetail(formatUcasJobProgressDetail(payloads, rowsLength));
+      showUcasJobNotice(payloads, rowsLength);
+
+      if (isUcasJobTerminal(status)) {
+        return buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, request.url);
+      }
+
+      await sleep(getUcasPollDelay(payloads));
+    }
+  } finally {
+    activeUcasJob = null;
+    setUcasJobActionsVisible(false);
+  }
+}
+
+async function handleUcasJobCancelClick() {
+  if (!activeUcasJob?.jobId || activeUcasJob.cancelRequested) return;
+
+  activeUcasJob.cancelRequested = true;
+  if (ucasJobCancelBtn) {
+    ucasJobCancelBtn.disabled = true;
+    ucasJobCancelBtn.textContent = "Cancelling...";
+  }
+  showStatus("Cancelling UCAS job", Math.max(lastStatusProgress, 40));
+
+  try {
+    await cancelUcasJob(activeUcasJob.jobId);
+  } catch (error) {
+    if (isUcasJobUnavailableError(error)) {
+      showWarning("UCAS job cancellation is not available on this backend.");
+    } else {
+      showWarning("Could not cancel UCAS job. It may already be finishing.");
+    }
+    if (ucasJobCancelBtn) {
+      ucasJobCancelBtn.disabled = false;
+      ucasJobCancelBtn.textContent = "Cancel UCAS job";
+    }
+  }
+}
+
+async function cancelUcasJob(jobId) {
+  const res = await fetch(getUcasJobUrl(jobId, "/cancel"), {
+    method: "POST",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UCAS_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for UCAS extraction.");
+
+  if ([404, 405, 501].includes(res.status)) {
+    throw createUcasJobUnavailableError(data?.detail || "UCAS job cancellation is unavailable.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "UCAS job cancellation failed with HTTP " + res.status);
+  }
+
+  return data;
 }
 
 function updateDebugStateFromBackend(data) {
@@ -1261,6 +1932,8 @@ function installScopedZoomGuard() {
 scrapeBtn?.addEventListener("click", handleExtractClick);
 retryBtn?.addEventListener("click", () => { clearError(); handleExtractClick(); });
 appendBtn?.addEventListener("click", enterAppendMode);
+ucasJobCancelBtn?.addEventListener("click", handleUcasJobCancelClick);
+setUcasJobActionsVisible(false);
 urlInput?.addEventListener("keydown", e => {
   if (e.key === "Enter") {
     e.preventDefault();
@@ -1298,7 +1971,6 @@ function showAppendStatus(message) {
 function updateUcasModeStatus(options = {}) {
   if (!ucasModeStatus) return;
 
-  const diagnostics = options.diagnostics || {};
   const active = options.active ?? (currentUcasModeConfirmed || isUcasUrl(urlInput?.value));
 
   if (!active) {
@@ -1307,12 +1979,7 @@ function updateUcasModeStatus(options = {}) {
     return;
   }
 
-  const details = ["Static catalog extraction"];
-  if (diagnostics.staticOnly === true) details.push("Static fetch");
-  if (diagnostics.llmUsed === false) details.push("No AI");
-  if (diagnostics.playwrightUsed === false) details.push("No Playwright");
-
-  ucasModeStatus.textContent = `UCAS mode active · ${[...new Set(details)].join(" · ")}`;
+  ucasModeStatus.textContent = "UCAS mode active · static catalog extraction";
   ucasModeStatus.classList.remove("hidden");
 }
 
@@ -1421,6 +2088,11 @@ async function runExtractionWithSession(request) {
   } = request;
   const hasExistingRows = appendRequested && allPrograms.length > 0;
   let requestAttempted = false;
+  const baseResultState = {
+    rows: allPrograms,
+    mode: currentResultMode,
+    seedUrls: appendedSeedUrls,
+  };
 
   resetDebugState();
   clearError();
@@ -1440,22 +2112,41 @@ async function runExtractionWithSession(request) {
   if (appendBtn) appendBtn.disabled = true;
 
   let programs = [];
+  const warningMessages = [];
 
   try {
     try {
-      setStatusDetail(depthOne ? "Depth-1 extraction enabled - this may take a few minutes for larger sites." : "");
-      if (ucasHint) setStatusDetail("Static catalog extraction");
-      startStatusSequence(
-        ucasHint ? buildUcasStatusSequence() : buildExtractionStatusSequence(depthOne),
-        3000,
-      );
+      if (ucasHint) {
+        showStatus("Starting UCAS static extraction", 8);
+        setStatusDetail("Preparing UCAS job");
+      } else {
+        setStatusDetail(depthOne ? "Depth-1 extraction enabled - this may take a few minutes for larger sites." : "");
+        startStatusSequence(buildExtractionStatusSequence(depthOne), 3000);
+      }
     } catch (progressError) {
       stopStatusSequence();
       if (debugOnly) console.warn("Could not start extraction progress messages.", progressError);
     }
 
     requestAttempted = true;
-    const result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+    let result;
+    if (ucasHint) {
+      try {
+        result = await runUcasJobExtraction(request, baseResultState);
+      } catch (error) {
+        if (!isUcasJobUnavailableError(error)) throw error;
+
+        warningMessages.push(
+          "UCAS job mode is unavailable. Showing synchronous UCAS preview; fee-complete UCAS extraction requires job mode."
+        );
+        stopStatusSequence();
+        startStatusSequence(buildUcasStatusSequence(), 3000);
+        result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+      }
+    } else {
+      result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+    }
+    updateDebugStateFromBackend(result);
     const ucasConfirmed = isUcasResponse(result);
     const ucasDiagnostics = getUcasDiagnostics(result);
     const responseMode = ucasConfirmed ? "ucas" : catalogMode ? "catalog" : "audit";
@@ -1469,7 +2160,7 @@ async function runExtractionWithSession(request) {
     if (ucasConfirmed) {
       stopStatusSequence();
       setStatusDetail("Static catalog extraction");
-      showStatus("Validating UCAS rows", 88);
+      showStatus("Validating UCAS completeness", 88);
     }
 
     const finalRows = getFinalRowsFromResponse(result, responseMode);
@@ -1501,14 +2192,18 @@ async function runExtractionWithSession(request) {
       const diagnostics = getResponseDiagnostics(result);
       if (ucasConfirmed && hasUcasSecurityPage(result)) {
         hideStatus();
-        return showWarning(getUcasSecurityWarning(false));
+        return showWarning([
+          ...warningMessages,
+          getUcasSecurityWarning(false),
+        ].join(" "));
       }
 
       if (ucasConfirmed && isIncompleteUcasResponse(result)) {
         hideStatus();
-        return showWarning(
-          "UCAS extraction incomplete. No validated rows were returned; check diagnostics before treating this run as complete."
-        );
+        return showWarning([
+          ...warningMessages,
+          "UCAS extraction incomplete. No validated rows were returned; check diagnostics before treating this run as complete.",
+        ].join(" "));
       }
 
       const candidatesFound = Math.max(
@@ -1525,21 +2220,27 @@ async function runExtractionWithSession(request) {
     }
 
     if (hasExistingRows && currentResultMode && currentResultMode !== responseMode) {
-      hideStatus();
-      showWarning("Cannot append results with different table columns. Clear results or use the same mode.");
-      return;
+      warningMessages.push(
+        "Mixed result modes appended; showing the current table columns. Clear results for a dedicated UCAS or non-UCAS table."
+      );
     }
 
     if (ucasConfirmed && hasUcasSecurityPage(result)) {
-      showWarning(getUcasSecurityWarning(true));
+      warningMessages.push(getUcasSecurityWarning(true));
     } else if (ucasConfirmed && isIncompleteUcasResponse(result)) {
-      showWarning(
-        "UCAS extraction incomplete - check diagnostics. Rows already extracted are shown below, but this run should not be treated as complete."
+      warningMessages.push(
+        "UCAS extraction incomplete - review diagnostics before using this as final data. Rows already extracted are shown below."
       );
     } else if (isPartialResponse(result)) {
-      showWarning(depthOne
+      warningMessages.push(depthOne
         ? "Partial Depth-1 result returned. Some detail pages used fallback listing data, but usable rows were extracted."
         : "Partial result returned. Some detail pages may have failed or timed out, but usable data was extracted.");
+    }
+
+    if (warningMessages.length) {
+      showWarning([...new Set(warningMessages)].join(" "));
+    } else {
+      clearWarning();
     }
 
     stopStatusSequence();
@@ -1553,14 +2254,16 @@ async function runExtractionWithSession(request) {
       });
     }
 
-    showStatus(ucasConfirmed ? "Checking for missing course data" : "Building table output...", 96);
-    activeResultsMode = responseMode;
-    currentResultMode = responseMode;
+    programs = tagRowsWithMode(programs, responseMode);
+
+    showStatus(ucasConfirmed ? "Validating UCAS completeness" : "Building table output...", 96);
+    activeResultsMode = hasExistingRows && currentResultMode ? currentResultMode : responseMode;
+    currentResultMode = activeResultsMode;
 
     if (hasExistingRows) {
       const { rows, skipped } = appendUniqueRows(allPrograms, programs, responseMode);
       allPrograms = rows;
-      appendedSeedUrls.push(url);
+      appendedSeedUrls = mergeSeedUrls(appendedSeedUrls, url);
       showAppendStatus(`Appended ${programs.length - skipped} new rows. Skipped ${skipped} duplicates.`);
     } else {
       allPrograms = programs;
@@ -1571,7 +2274,7 @@ async function runExtractionWithSession(request) {
     renderResults(url);
     if (debugOnly || shouldShowContentDiagnostics()) renderDebugPanel(debugOnly);
     showStatus(
-      ucasConfirmed ? "Finalizing deterministic UCAS results" : "Finalising diagnostics...",
+      ucasConfirmed ? "Preparing UCAS catalog" : "Finalising diagnostics...",
       100,
     );
     await sleep(100);
@@ -1659,20 +2362,15 @@ function buildExtractionStatusSequence(depthOne) {
 
 function buildUcasStatusSequence() {
   const phrases = [
-    "UCAS mode active",
-    "Fetching UCAS search results",
-    "Reading UCAS listing page",
+    "Starting UCAS static extraction",
+    "Fetching UCAS listing pages",
     "Checking UCAS pagination",
-    "Collecting course links",
-    "Parsing UCAS course cards",
-    "Fetching next UCAS results page",
-    "Reconciling UCAS result count",
-    "Fetching course fee pages",
+    "Collecting UCAS course links",
+    "Saving UCAS progress",
+    "Fetching UCAS fee pages",
     "Reading Fees and funding sections",
-    "Validating UCAS rows",
-    "Checking for missing course data",
+    "Validating UCAS completeness",
     "Preparing UCAS catalog",
-    "Finalizing deterministic UCAS results",
   ];
 
   return phrases.map((text, index) => ({
@@ -1687,6 +2385,16 @@ function isIncompleteUcasResponse(result) {
   return Boolean(
     diagnostics.ucasComplete === false ||
     diagnostics.partial === true ||
+    diagnostics.waiting === true ||
+    diagnostics.rateLimited === true ||
+    diagnostics.rate_limited === true ||
+    Number(diagnostics.feePagesRemaining ?? diagnostics.fee_pages_remaining ?? 0) > 0 ||
+    Number(diagnostics.feeFetchFailedCount || 0) > 0 ||
+    Number(diagnostics.feeParseFailedCount || 0) > 0 ||
+    (
+      diagnostics.paginationStoppedReason &&
+      !/^(completed|complete|done)$/i.test(String(diagnostics.paginationStoppedReason))
+    ) ||
     hasUcasSecurityPage(result)
   );
 }
@@ -1697,7 +2405,7 @@ function getUcasSecurityWarning(hasRows) {
     : "No validated rows were extracted, and this run should not be treated as complete.";
 
   return [
-    "UCAS security/block page detected. Static fetch could not read this page.",
+    "UCAS security/rate-limit page detected for one or more pages.",
     "UCAS extraction may be incomplete because one or more pages returned a security/check page.",
     rowMessage,
   ].join(" ");
@@ -2190,15 +2898,25 @@ function renderDebugPanel(forceVisible = false) {
     ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
     ["UCAS mode", formatYesNo(diagnostics.ucasMode ?? diagnostics.ucasDetected)],
     ["UCAS complete", formatYesNo(diagnostics.ucasComplete)],
+    ["UCAS job id", diagnostics.jobId],
+    ["UCAS job status", diagnostics.jobStatus],
+    ["UCAS phase", diagnostics.phase],
     ["Static only", formatYesNo(diagnostics.staticOnly)],
     ["LLM used", formatYesNo(diagnostics.llmUsed)],
     ["Playwright used", formatYesNo(diagnostics.playwrightUsed)],
     ["Expected UCAS results", diagnostics.expectedResultCount],
+    ["UCAS rows collected", diagnostics.rowsCollected],
     ["UCAS rows output", diagnostics.rowsOutput],
     ["Unique UCAS courses", diagnostics.uniqueCourses],
     ["Listing pages fetched", diagnostics.listingPagesFetched],
     ["Listing pages expected", diagnostics.listingPagesExpected],
     ["Pagination stopped reason", diagnostics.paginationStoppedReason],
+    ["Fee pages completed", diagnostics.feePagesCompleted],
+    ["Fee pages remaining", diagnostics.feePagesRemaining],
+    ["UCAS waiting", formatYesNo(diagnostics.waiting)],
+    ["UCAS rate limited", formatYesNo(diagnostics.rateLimited)],
+    ["Next retry", diagnostics.nextRetryAt],
+    ["Estimated remaining", diagnostics.estimatedRemainingTime],
     ["Fees found", diagnostics.feeFoundCount],
     ["No fee provided", diagnostics.noFeeProvidedCount],
     ["Fee option required", diagnostics.optionRequiredCount],
@@ -2955,11 +3673,11 @@ function normalizeCatalogRows(rows) {
 
 function appendUniqueRows(existingRows, incomingRows, mode) {
   const combined = [...existingRows];
-  const seen = new Set(existingRows.map(row => getRowDedupeKey(row, mode)));
+  const seen = new Set(existingRows.map(row => getRowDedupeKey(row, row?.__resultMode || mode)));
   let skipped = 0;
 
   incomingRows.forEach(row => {
-    const key = getRowDedupeKey(row, mode);
+    const key = getRowDedupeKey(row, row?.__resultMode || mode);
     if (seen.has(key)) {
       skipped += 1;
       return;
@@ -3131,6 +3849,7 @@ function setResultsTableMode(mode) {
   const nextMode = mode === "ucas" ? "ucas" : mode === "catalog" ? "catalog" : "audit";
   if (tableHeaderRow.dataset.mode === nextMode) return;
 
+  if (programTable) programTable.dataset.mode = nextMode;
   tableHeaderRow.innerHTML =
     nextMode === "ucas"
       ? UCAS_TABLE_HEADER_HTML
@@ -3152,7 +3871,7 @@ function renderTable(programs) {
   tableBody.innerHTML = programs.map((p, i) => `
     <tr>
       <td class="col-num">${i + 1}</td>
-      <td class="name-cell">${esc(p.name ?? "-")}</td>
+      <td class="name-cell"><span class="cell-clamp">${esc(p.name ?? "-")}</span></td>
       <td>${levelBadge(p.level)}</td>
       <td>${p.department ? esc(p.department) : '<span class="nil">-</span>'}</td>
       <td>${p.broad_subject ? `<span class="chip">${esc(p.broad_subject)}</span>` : '<span class="nil">-</span>'}</td>
@@ -3187,7 +3906,7 @@ function renderCatalogTable(rows) {
   tableBody.innerHTML = rows.map((row, i) => `
     <tr>
       <td class="col-num">${i + 1}</td>
-      <td class="name-cell">${catalogCell(row.courseName)}</td>
+      <td class="name-cell"><span class="cell-clamp">${catalogCell(row.courseName)}</span></td>
       <td>${catalogCell(row.universityName)}</td>
       <td class="catalog-url-cell">${catalogUrlCell(row.courseUrl)}</td>
       <td>${catalogCell(row.levelOfStudy)}</td>
@@ -3213,12 +3932,12 @@ function renderUcasTable(rows) {
   tableBody.innerHTML = rows.map((row, i) => `
     <tr>
       <td class="col-num">${i + 1}</td>
-      <td class="name-cell">${catalogCell(row.programName)}</td>
-      <td>${catalogCell(row.universityProvider)}</td>
-      <td>${catalogCell(row.ucasPoints)}</td>
-      <td>${catalogCell(row.fee)}</td>
-      <td>${catalogCell(row.feeStatus)}</td>
-      <td>${catalogCell(row.qualification)}</td>
+      <td class="name-cell"><span class="cell-clamp">${catalogCell(row.programName)}</span></td>
+      <td class="qualification-cell">${catalogCell(row.qualification)}</td>
+      <td class="provider-cell">${catalogCell(row.universityProvider)}</td>
+      <td class="ucas-points-cell">${catalogCell(row.ucasPoints)}</td>
+      <td class="fee-cell">${catalogCell(row.fee)}</td>
+      <td class="fee-status-cell">${catalogCell(row.feeStatus)}</td>
       <td>${catalogCell(row.studyMode)}</td>
       <td>${catalogCell(row.duration)}</td>
       <td>${catalogCell(row.startDate)}</td>

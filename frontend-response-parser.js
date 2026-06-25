@@ -82,13 +82,31 @@
       "blockedPageCount",
       "blockedPageUrls",
       "blockedPageType",
+      "jobId",
+      "job_id",
+      "jobStatus",
+      "job_status",
+      "phase",
+      "rowsCollected",
+      "rows_collected",
+      "feePagesCompleted",
+      "fee_pages_completed",
+      "feePagesRemaining",
+      "fee_pages_remaining",
+      "rateLimited",
+      "rate_limited",
+      "waiting",
+      "nextRetryAt",
+      "next_retry_at",
+      "estimatedRemainingTime",
+      "estimated_remaining_time",
     ];
 
     return keys.reduce((diagnostics, key) => {
       const values = responseValues(result, key);
       let value = values[0];
 
-      if (["ucasMode", "ucasDetected", "staticOnly", "partial", "securityPageDetected"].includes(key)) {
+      if (["ucasMode", "ucasDetected", "staticOnly", "partial", "securityPageDetected", "rateLimited", "rate_limited", "waiting"].includes(key)) {
         if (values.some(isTrue)) value = true;
       } else if (key === "ucasComplete" && values.some(item => item === false || String(item).toLowerCase() === "false")) {
         value = false;

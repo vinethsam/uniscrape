@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 ORIGIN = "http://127.0.0.1:8767"
 LAST_REQUEST_PATH = ROOT / "tests" / ".browser-fixture-last-request.json"
+UCAS_JOBS = {}
 
 
 def response_for(payload):
@@ -117,6 +118,35 @@ class FixtureHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith("/ucas/jobs/"):
+            parts = path.strip("/").split("/")
+            job_id = parts[2] if len(parts) >= 3 else ""
+            job = UCAS_JOBS.get(job_id)
+            if not job:
+                self.send_json(404, {"detail": "Job not found"})
+                return
+
+            if len(parts) == 4 and parts[3] == "results":
+                self.send_json(200, response_for(job["payload"]))
+                return
+
+            job["polls"] += 1
+            waiting = "rate-limit-fixture" in str(job["payload"].get("url") or "") and job["polls"] == 1
+            status = "rate_limited" if waiting else "complete"
+            self.send_json(200, {
+                "job_id": job_id,
+                "status": status,
+                "phase": "UCAS rate-limit detected - waiting before retry" if waiting else "Preparing UCAS catalog",
+                "expectedResultCount": 1,
+                "rowsCollected": 1,
+                "listingPagesFetched": 1,
+                "feePagesCompleted": 1 if not waiting else 0,
+                "feePagesRemaining": 0 if not waiting else 1,
+                "nextRetryAt": "2026-06-25T12:00:00Z" if waiting else "",
+                "catalogRows": response_for(job["payload"])["catalogRows"],
+            })
+            return
+
         relative_path = "index.html" if path == "/" else path.lstrip("/")
         file_path = (ROOT / relative_path).resolve()
 
@@ -152,8 +182,33 @@ class FixtureHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         payload = json.loads(self.rfile.read(length) or b"{}")
 
+        if path == "/ucas/jobs":
+            job_id = f"fixture-ucas-job-{len(UCAS_JOBS) + 1}"
+            UCAS_JOBS[job_id] = {"payload": payload, "polls": 0}
+            LAST_REQUEST_PATH.write_text(json.dumps({
+                "path": path,
+                "payload": payload,
+                "hasAuthorization": bool(self.headers.get("Authorization")),
+            }), encoding="utf-8")
+            self.send_json(200, {
+                "job_id": job_id,
+                "status": "queued",
+                "phase": "Starting UCAS static extraction",
+            })
+            return
+
+        if path.startswith("/ucas/jobs/") and path.endswith("/cancel"):
+            parts = path.strip("/").split("/")
+            job_id = parts[2] if len(parts) >= 3 else ""
+            if job_id not in UCAS_JOBS:
+                self.send_json(404, {"detail": "Job not found"})
+                return
+            self.send_json(200, {"job_id": job_id, "status": "cancelled"})
+            return
+
         if path == "/crawl":
             LAST_REQUEST_PATH.write_text(json.dumps({
+                "path": path,
                 "payload": payload,
                 "hasAuthorization": bool(self.headers.get("Authorization")),
             }), encoding="utf-8")

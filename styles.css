@@ -85,8 +85,15 @@
   --sb-hover:  #282a28;
 
   /* Fluid shell sizing: roomy on desktops, still padded on laptops/mobile. */
-  --shell-max: 1840px;
+  --shell-max: 2240px;
   --shell-gutter: clamp(.9rem, 2.1vw, 2rem);
+}
+
+@media (min-width: 2400px) {
+  :root {
+    --shell-max: 2560px;
+    --shell-gutter: clamp(1.2rem, 2.4vw, 3rem);
+  }
 }
 
 /* ---- Base --------------------------------------------------------- */
@@ -831,6 +838,14 @@ body.route-extractor #databasesPage,
   flex-wrap: wrap;
 }
 
+.input-row .text-input {
+  flex: 1 1 min(42rem, 100%);
+}
+
+.input-row .primary-btn {
+  flex: 0 0 auto;
+}
+
 .text-input {
   flex: 1;
   min-width: min(200px, 100%);
@@ -1043,6 +1058,12 @@ body.route-extractor #databasesPage,
   color: var(--faint);
   font-size: .66rem;
 }
+.status-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: .45rem;
+  min-width: 0;
+}
 .spinner {
   width: 9px; height: 9px;
   border: 1.5px solid rgba(255,255,255,0.10);
@@ -1198,6 +1219,7 @@ body.route-extractor #databasesPage,
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   overflow-x: auto;
+  overflow-y: visible;
   max-width: 100%;
   background: rgba(5,6,5,0.72);
   scrollbar-width: thin;
@@ -1210,11 +1232,23 @@ body.route-extractor #databasesPage,
 
 table {
   width: 100%;
-  min-width: 0;
+  min-width: 1080px;
   border-collapse: collapse;
   font-size: .72rem;
-  table-layout: auto;
+  table-layout: fixed;
 }
+
+#programTable[data-mode="audit"] { min-width: 1180px; }
+#programTable[data-mode="catalog"] { min-width: 1040px; }
+#programTable[data-mode="ucas"] { min-width: 1120px; }
+
+#programTable[data-mode="ucas"] th:nth-child(2) { width: 18%; }
+#programTable[data-mode="ucas"] th:nth-child(3) { width: 11%; }
+#programTable[data-mode="ucas"] th:nth-child(4) { width: 15%; }
+#programTable[data-mode="ucas"] th:nth-child(5) { width: 7%; }
+#programTable[data-mode="ucas"] th:nth-child(6) { width: 9%; }
+#programTable[data-mode="ucas"] th:nth-child(7) { width: 11%; }
+#programTable[data-mode="ucas"] th:nth-child(12) { width: 13%; }
 thead {
   background: rgba(255,255,255,0.025);
   position: sticky; top: 0; z-index: 2;
@@ -1278,6 +1312,22 @@ td.name-cell {
   max-width: clamp(12rem, 24vw, 32rem);
   font-weight: 500;
 }
+.cell-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.qualification-cell,
+.provider-cell,
+.fee-cell,
+.fee-status-cell,
+.catalog-url-cell {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 /* ---- Badges ------------------------------------------------------ */
 .level-badge {
@@ -1324,9 +1374,36 @@ td.name-cell {
   text-overflow: clip;
   vertical-align: bottom;
   white-space: normal;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .nil { color: var(--faint); }
+
+@media (min-width: 1800px) {
+  table {
+    font-size: .74rem;
+  }
+
+  th,
+  td {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  td.name-cell {
+    max-width: clamp(16rem, 22vw, 44rem);
+  }
+}
+
+@media (max-width: 760px) {
+  .input-row .primary-btn {
+    width: 100%;
+  }
+
+  .status-actions .secondary-btn {
+    width: 100%;
+  }
+}
 
 /* ---- Modal ------------------------------------------------------- */
 .modal {
