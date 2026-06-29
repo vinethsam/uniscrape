@@ -40,8 +40,8 @@ const GOOGLE_CLIENT_ID = "658260663487-sng89uf5tvo0t6915bemcrjl8fb7mchs.apps.goo
 const EXTRACT_TIMEOUT_MS = 300000;
 const UCAS_JOB_REQUEST_TIMEOUT_MS = 30000;
 const UCAS_JOB_RUNNING_POLL_MS = 4000;
-const UCAS_JOB_WAITING_POLL_MIN_MS = 10000;
-const UCAS_JOB_WAITING_POLL_MAX_MS = 30000;
+const UCAS_JOB_WAITING_POLL_MIN_MS = 5000;
+const UCAS_JOB_WAITING_POLL_MAX_MS = 15000;
 const VERIFY_ACCESS_TIMEOUT_MS = 15000;
 const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
 const LEGACY_UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
@@ -244,7 +244,6 @@ const CATALOG_TABLE_HEADER_HTML = `
 `;
 
 const UCAS_TABLE_HEADER_HTML = `
-  <th class="col-num">#</th>
   <th>Programme Name</th>
   <th>Award / Qualification</th>
   <th>University / Provider</th>
@@ -1338,23 +1337,32 @@ function getObjectSources(value) {
   return sources;
 }
 
-function firstPresentValue(...values) {
-  return values.find(value =>
-    value === 0 || value === false || (value !== undefined && value !== null && String(value).trim() !== "")
-  );
+function hasPresentJobValue(value) {
+  return value === 0 || value === false || (value !== undefined && value !== null && String(value).trim() !== "");
 }
 
-function firstJobValue(payloads, keys) {
+function firstPresentValue(...values) {
+  return values.find(hasPresentJobValue);
+}
+
+function firstJobValue(payloads, keys, options = {}) {
+  const { allowEmpty = false } = options;
   const sources = payloads.flatMap(getObjectSources);
   for (const source of sources) {
     for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
       const value = source[key];
-      if (value === 0 || value === false || (value !== undefined && value !== null && String(value).trim() !== "")) {
+      if (allowEmpty || hasPresentJobValue(value)) {
         return value;
       }
     }
   }
   return undefined;
+}
+
+function firstJobBoolean(payloads, keys) {
+  const value = firstJobValue(payloads, keys);
+  return value === true || value === 1 || String(value).toLowerCase() === "true";
 }
 
 function normalizeUcasJobStatus(value) {
@@ -1374,7 +1382,7 @@ function normalizeUcasJobStatus(value) {
   return aliases[status] || status || "running";
 }
 
-function getUcasJobStatus(payloads) {
+function getUcasRawJobStatus(payloads) {
   return normalizeUcasJobStatus(firstJobValue(payloads, [
     "status",
     "state",
@@ -1383,8 +1391,104 @@ function getUcasJobStatus(payloads) {
   ]));
 }
 
+function getUcasNextRetryAt(payloads) {
+  const value = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"], { allowEmpty: true });
+  return hasPresentJobValue(value) ? value : "";
+}
+
+function getUcasRetryAttemptCount(payloads) {
+  const value = firstJobValue(payloads, [
+    "rate_limit_attempt_count",
+    "rateLimitAttemptCount",
+    "retry_attempt_count",
+    "retryAttemptCount",
+    "attempt_count",
+    "attemptCount",
+  ], { allowEmpty: true });
+  return hasPresentJobValue(value) ? value : undefined;
+}
+
+function getUcasCurrentListingPage(payloads) {
+  const value = firstJobValue(payloads, [
+    "current_listing_page",
+    "currentListingPage",
+    "listing_page",
+    "listingPage",
+    "page",
+  ], { allowEmpty: true });
+  return hasPresentJobValue(value) ? value : undefined;
+}
+
+function getUcasNextListingUrl(payloads) {
+  const value = firstJobValue(payloads, [
+    "next_listing_url",
+    "nextListingUrl",
+    "current_listing_url",
+    "currentListingUrl",
+    "target_url",
+    "targetUrl",
+    "current_url",
+    "currentUrl",
+  ], { allowEmpty: true });
+  return hasPresentJobValue(value) ? value : "";
+}
+
+function isUcasRetryOrWaitSignalled(payloads) {
+  return Boolean(
+    getUcasNextRetryAt(payloads) ||
+    firstJobBoolean(payloads, [
+      "waiting",
+      "is_waiting",
+      "isWaiting",
+      "rate_limited",
+      "rateLimited",
+      "ucas_rate_limited",
+      "ucasRateLimited",
+    ])
+  );
+}
+
+function getUcasJobStatus(payloads, options = {}) {
+  const rawStatus = getUcasRawJobStatus(payloads);
+  const phaseText = String(firstJobValue(payloads, [
+    "job_phase",
+    "jobPhase",
+    "phase",
+    "current_phase",
+    "currentPhase",
+    "stage",
+    "step",
+    "message",
+  ]) || "").toLowerCase();
+  const rateLimited = rawStatus === "rate_limited" || firstJobBoolean(payloads, [
+    "rate_limited",
+    "rateLimited",
+    "ucas_rate_limited",
+    "ucasRateLimited",
+  ]) || phaseText.includes("rate");
+  const waiting = rawStatus === "waiting" || rawStatus === "paused" || firstJobBoolean(payloads, [
+    "waiting",
+    "is_waiting",
+    "isWaiting",
+  ]) || phaseText.includes("wait") || phaseText.includes("backoff");
+  const retryScheduled = isUcasRetryOrWaitSignalled(payloads);
+
+  if (rawStatus === "cancelled" && options.cancelRequested !== true) {
+    if (rateLimited) return "rate_limited";
+    if (waiting || retryScheduled) return "waiting";
+    return "failed";
+  }
+
+  if (rawStatus !== "complete" && rawStatus !== "partial") {
+    if (rateLimited) return "rate_limited";
+    if (waiting || (rawStatus === "failed" && retryScheduled)) return "waiting";
+  }
+
+  return rawStatus;
+}
+
 function isUcasJobTerminal(status) {
-  return ["complete", "failed", "cancelled"].includes(normalizeUcasJobStatus(status));
+  return ["complete", "failed", "cancelled", "partial"].includes(normalizeUcasJobStatus(status));
 }
 
 function isUcasJobWaiting(status, payloads) {
@@ -1393,10 +1497,12 @@ function isUcasJobWaiting(status, payloads) {
 
   const waitingValue = firstJobValue(payloads, [
     "waiting",
-    "rate_limited",
-    "rateLimited",
     "is_waiting",
     "isWaiting",
+    "rate_limited",
+    "rateLimited",
+    "ucas_rate_limited",
+    "ucasRateLimited",
   ]);
   return waitingValue === true || String(waitingValue).toLowerCase() === "true";
 }
@@ -1423,7 +1529,7 @@ function humanizeUcasPhase(value, status = "") {
     return "UCAS rate-limit detected - waiting before retry";
   }
   if (normalizedStatus === "waiting" || phase.includes("wait") || phase.includes("backoff")) {
-    return "UCAS is waiting before retry";
+    return "Waiting before retry";
   }
   if (phase.includes("fee") && phase.includes("fund")) return "Reading Fees and funding sections";
   if (phase.includes("fee")) return "Fetching UCAS fee pages";
@@ -1439,7 +1545,14 @@ function humanizeUcasPhase(value, status = "") {
 }
 
 function getUcasJobPhase(payloads, status) {
+  const currentListingPage = getUcasCurrentListingPage(payloads);
+  if (normalizeUcasJobStatus(status) === "rate_limited" && currentListingPage !== undefined) {
+    return `UCAS rate-limit detected on listing page ${currentListingPage}`;
+  }
+
   return humanizeUcasPhase(firstJobValue(payloads, [
+    "job_phase",
+    "jobPhase",
     "phase",
     "current_phase",
     "currentPhase",
@@ -1487,26 +1600,63 @@ function formatUcasRetryTime(value) {
   return text;
 }
 
-function formatUcasJobProgressDetail(payloads, rowsLength) {
-  const status = getUcasJobStatus(payloads);
+function getUcasFeeProgress(payloads) {
+  return {
+    feePagesCompleted: firstJobValue(payloads, [
+      "fee_pages_completed",
+      "feePagesCompleted",
+      "fee_completed_count",
+      "feeCompletedCount",
+      "feeFoundCount",
+    ]),
+    feePagesRemaining: firstJobValue(payloads, [
+      "fee_pages_remaining",
+      "feePagesRemaining",
+      "fee_queue_length",
+      "feeQueueLength",
+    ]),
+    feeDetailsAttempted: firstJobValue(payloads, [
+      "fee_details_attempted",
+      "feeDetailsAttempted",
+    ]),
+    feeQueueLength: firstJobValue(payloads, [
+      "fee_queue_length",
+      "feeQueueLength",
+    ]),
+  };
+}
+
+function formatUcasJobProgressDetail(payloads, rowsLength, options = {}) {
+  const status = getUcasJobStatus(payloads, options);
   const phase = getUcasJobPhase(payloads, status);
   const expectedCount = getUcasJobExpectedCount(payloads);
   const rowsCollected = getUcasJobRowsCollected(payloads, rowsLength);
   const listingPagesFetched = firstJobValue(payloads, ["listing_pages_fetched", "listingPagesFetched"]);
-  const feePagesCompleted = firstJobValue(payloads, ["fee_pages_completed", "feePagesCompleted", "feeFoundCount"]);
-  const feePagesRemaining = firstJobValue(payloads, ["fee_pages_remaining", "feePagesRemaining"]);
-  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
+  const { feePagesCompleted, feePagesRemaining, feeDetailsAttempted, feeQueueLength } = getUcasFeeProgress(payloads);
+  const currentListingPage = getUcasCurrentListingPage(payloads);
+  const nextListingUrl = getUcasNextListingUrl(payloads);
+  const retryAttemptCount = getUcasRetryAttemptCount(payloads);
+  const nextRetryAt = isUcasJobWaiting(status, payloads) ? getUcasNextRetryAt(payloads) : "";
   const eta = firstJobValue(payloads, ["estimated_remaining_time", "estimatedRemainingTime", "eta", "eta_seconds", "etaSeconds"]);
+  const previousListingPage = Number(currentListingPage) > 1 ? Number(currentListingPage) - 1 : undefined;
 
   const parts = [
     `Status: ${status.replace(/_/g, " ")}`,
     phase ? `Phase: ${phase}` : "",
+    previousListingPage && isUcasJobWaiting(status, payloads)
+      ? `Page ${previousListingPage} collected - waiting for page ${currentListingPage}`
+      : "",
     expectedCount !== undefined
-      ? `Rows: ${rowsCollected || 0} / ${expectedCount}`
-      : `Rows: ${rowsCollected || 0}`,
+      ? `Rows collected: ${rowsCollected || 0} / ${expectedCount}`
+      : `Rows collected: ${rowsCollected || 0}`,
+    currentListingPage !== undefined ? `Current listing page: ${currentListingPage}` : "",
+    nextListingUrl ? `Current target: ${nextListingUrl}` : "",
     listingPagesFetched !== undefined ? `Listing pages fetched: ${listingPagesFetched}` : "",
     feePagesCompleted !== undefined ? `Fee pages completed: ${feePagesCompleted}` : "",
     feePagesRemaining !== undefined ? `Fee pages remaining: ${feePagesRemaining}` : "",
+    feeDetailsAttempted !== undefined ? `Fee details attempted: ${feeDetailsAttempted}` : "",
+    feeQueueLength !== undefined ? `Fee queue length: ${feeQueueLength}` : "",
+    retryAttemptCount !== undefined ? `Retry attempt ${retryAttemptCount} scheduled` : "",
     nextRetryAt ? `Next retry: ${formatUcasRetryTime(nextRetryAt)}` : "",
     eta ? `Estimated remaining: ${eta}` : "",
   ].filter(Boolean);
@@ -1514,7 +1664,7 @@ function formatUcasJobProgressDetail(payloads, rowsLength) {
   return parts.join(" | ");
 }
 
-function getUcasJobProgressPercent(payloads, rowsLength) {
+function getUcasJobProgressPercent(payloads, rowsLength, options = {}) {
   const explicitProgress = Number(firstJobValue(payloads, [
     "progress_percent",
     "progressPercent",
@@ -1525,7 +1675,7 @@ function getUcasJobProgressPercent(payloads, rowsLength) {
     return Math.min(100, explicitProgress);
   }
 
-  const status = getUcasJobStatus(payloads);
+  const status = getUcasJobStatus(payloads, options);
   if (status === "queued") return 12;
   if (status === "complete") return 100;
   if (status === "failed" || status === "cancelled") return Math.max(lastStatusProgress, rowsLength ? 88 : 40);
@@ -1540,11 +1690,11 @@ function getUcasJobProgressPercent(payloads, rowsLength) {
     : Math.max(lastStatusProgress, 26);
 }
 
-function getUcasPollDelay(payloads) {
-  const status = getUcasJobStatus(payloads);
+function getUcasPollDelay(payloads, options = {}) {
+  const status = getUcasJobStatus(payloads, options);
   if (!isUcasJobWaiting(status, payloads)) return UCAS_JOB_RUNNING_POLL_MS;
 
-  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
+  const nextRetryAt = getUcasNextRetryAt(payloads);
   if (nextRetryAt) {
     const retryMs = new Date(nextRetryAt).getTime();
     if (Number.isFinite(retryMs)) {
@@ -1617,17 +1767,23 @@ function collectUcasWarnings(...payloads) {
   return [...new Set(warnings.map(value => String(value)).filter(Boolean))];
 }
 
-function buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl) {
+function buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl, options = {}) {
   const payloads = [statusPayload, resultsPayload].filter(Boolean);
   const statusDiagnostics = getUcasDiagnostics(statusPayload);
   const resultsDiagnostics = getUcasDiagnostics(resultsPayload);
-  const status = getUcasJobStatus(payloads);
+  const status = getUcasJobStatus(payloads, options);
   const waiting = isUcasJobWaiting(status, payloads);
   const expectedCount = getUcasJobExpectedCount(payloads);
   const rowsCollected = getUcasJobRowsCollected(payloads, rows.length);
-  const nextRetryAt = firstJobValue(payloads, ["next_retry_at", "nextRetryAt"]);
-  const feePagesCompleted = firstJobValue(payloads, ["fee_pages_completed", "feePagesCompleted"]);
-  const feePagesRemaining = firstJobValue(payloads, ["fee_pages_remaining", "feePagesRemaining"]);
+  const nextRetryAt = waiting ? getUcasNextRetryAt(payloads) : "";
+  const { feePagesCompleted, feePagesRemaining, feeDetailsAttempted, feeQueueLength } = getUcasFeeProgress(payloads);
+  const rawStatus = getUcasRawJobStatus(payloads);
+  const rateLimited = status === "rate_limited" || firstJobBoolean(payloads, [
+    "rate_limited",
+    "rateLimited",
+    "ucas_rate_limited",
+    "ucasRateLimited",
+  ]);
 
   return {
     ...statusDiagnostics,
@@ -1637,19 +1793,26 @@ function buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sou
     staticOnly: true,
     jobId,
     jobStatus: status,
+    rawJobStatus: rawStatus,
     phase: getUcasJobPhase(payloads, status),
     expectedResultCount: expectedCount ?? resultsDiagnostics.expectedResultCount ?? statusDiagnostics.expectedResultCount,
     rowsCollected,
     rowsOutput: rows.length || resultsDiagnostics.rowsOutput || statusDiagnostics.rowsOutput,
     listingPagesFetched: firstJobValue(payloads, ["listing_pages_fetched", "listingPagesFetched"]) ?? resultsDiagnostics.listingPagesFetched ?? statusDiagnostics.listingPagesFetched,
+    currentListingPage: getUcasCurrentListingPage(payloads),
+    nextListingUrl: getUcasNextListingUrl(payloads),
     feePagesCompleted,
     feePagesRemaining,
-    rateLimited: status === "rate_limited" || waiting,
+    feeDetailsAttempted,
+    feeQueueLength,
+    feeCompletedCount: feePagesCompleted,
+    rateLimitAttemptCount: getUcasRetryAttemptCount(payloads),
+    rateLimited,
     waiting,
     nextRetryAt,
     estimatedRemainingTime: firstJobValue(payloads, ["estimated_remaining_time", "estimatedRemainingTime", "eta", "eta_seconds", "etaSeconds"]),
     sourceUrl,
-    partial: status === "failed" || status === "cancelled" || waiting
+    partial: status === "failed" || status === "cancelled" || status === "partial" || waiting
       ? true
       : (resultsDiagnostics.partial ?? statusDiagnostics.partial),
     ucasComplete: status === "complete"
@@ -1658,9 +1821,9 @@ function buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sou
   };
 }
 
-function buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, sourceUrl) {
+function buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, sourceUrl, options = {}) {
   const rows = getBestUcasRowsFromPayloads(resultsPayload, statusPayload, latestRows);
-  const diagnostics = buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl);
+  const diagnostics = buildUcasJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl, options);
   const warnings = collectUcasWarnings(statusPayload, resultsPayload);
 
   return {
@@ -1702,7 +1865,7 @@ function tagRowsWithMode(rows, mode) {
   });
 }
 
-function renderUcasJobRows(rawRows, request, baseState, statusPayload, resultsPayload) {
+function renderUcasJobRows(rawRows, request, baseState, statusPayload, resultsPayload, options = {}) {
   const normalizedRows = tagRowsWithMode(normalizeUcasRows(rawRows), "ucas");
   if (!normalizedRows.length) return;
 
@@ -1721,16 +1884,40 @@ function renderUcasJobRows(rawRows, request, baseState, statusPayload, resultsPa
   currentResultMode = displayMode;
   currentUcasModeConfirmed = true;
   appendedSeedUrls = mergeSeedUrls(baseState?.seedUrls, request.url);
-  updateUcasModeStatus({ active: true, diagnostics: buildUcasJobDiagnostics("", statusPayload, resultsPayload, rawRows, request.url) });
+  updateUcasModeStatus({ active: true, diagnostics: buildUcasJobDiagnostics("", statusPayload, resultsPayload, rawRows, request.url, options) });
 
   renderResults(request.url);
 }
 
-function showUcasJobNotice(payloads, rowsLength) {
-  const status = getUcasJobStatus(payloads);
+function showUcasJobNotice(payloads, rowsLength, options = {}) {
+  const status = getUcasJobStatus(payloads, options);
+  const currentListingPage = getUcasCurrentListingPage(payloads);
 
   if (isUcasJobWaiting(status, payloads)) {
-    showWarning("UCAS is rate-limiting requests. Waiting before retry. Rows collected so far are shown.");
+    const isRateLimited = status === "rate_limited";
+    const pageText = currentListingPage !== undefined ? ` listing page ${currentListingPage}` : "";
+    const rowsText = rowsLength
+      ? "Rows collected so far are shown below."
+      : "Rows collected so far will be shown below.";
+    const feeText = Number(firstJobValue(payloads, ["fee_queue_length", "feeQueueLength"]) || 0) > 0
+      ? "Fee collection has not started because listing pagination is incomplete."
+      : "";
+    showWarning([
+      isRateLimited
+        ? `UCAS is rate-limiting${pageText}. Waiting before retry.`
+        : "Waiting before retry.",
+      rowsText,
+      feeText,
+    ].filter(Boolean).join(" "));
+    return;
+  }
+
+  if (status === "partial") {
+    showWarning(
+      rowsLength
+        ? "UCAS extraction incomplete - review diagnostics before using as final data. Rows collected so far are shown below."
+        : "UCAS extraction incomplete - review diagnostics before using as final data."
+    );
     return;
   }
 
@@ -1783,23 +1970,24 @@ async function runUcasJobExtraction(request, baseState) {
 
       latestRows = getBestUcasRowsFromPayloads(resultsPayload, statusPayload, latestRows);
       const payloads = [statusPayload, resultsPayload].filter(Boolean);
-      const status = getUcasJobStatus(payloads);
+      const statusOptions = { cancelRequested: Boolean(activeUcasJob?.cancelRequested) };
+      const status = getUcasJobStatus(payloads, statusOptions);
       const phase = getUcasJobPhase(payloads, status);
       const rowsLength = latestRows.length;
 
       if (rowsLength) {
-        renderUcasJobRows(latestRows, request, baseState, statusPayload, resultsPayload);
+        renderUcasJobRows(latestRows, request, baseState, statusPayload, resultsPayload, statusOptions);
       }
 
-      showStatus(phase, getUcasJobProgressPercent(payloads, rowsLength));
-      setStatusDetail(formatUcasJobProgressDetail(payloads, rowsLength));
-      showUcasJobNotice(payloads, rowsLength);
+      showStatus(phase, getUcasJobProgressPercent(payloads, rowsLength, statusOptions));
+      setStatusDetail(formatUcasJobProgressDetail(payloads, rowsLength, statusOptions));
+      showUcasJobNotice(payloads, rowsLength, statusOptions);
 
       if (isUcasJobTerminal(status)) {
-        return buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, request.url);
+        return buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, request.url, statusOptions);
       }
 
-      await sleep(getUcasPollDelay(payloads));
+      await sleep(getUcasPollDelay(payloads, statusOptions));
     }
   } finally {
     activeUcasJob = null;
@@ -1979,7 +2167,7 @@ function updateUcasModeStatus(options = {}) {
     return;
   }
 
-  ucasModeStatus.textContent = "UCAS mode active · static catalog extraction";
+  ucasModeStatus.textContent = "UCAS mode active \u00b7 static catalog extraction";
   ucasModeStatus.classList.remove("hidden");
 }
 
@@ -2876,6 +3064,7 @@ function renderDebugPanel(forceVisible = false) {
   const stats = rd.stats || {};
   const markdown = debugState.finalExtractionMarkdown || debugState.markdown || "";
   const diagnostics = be.diagnostics || {};
+  const isUcasDiagnostics = Boolean(diagnostics.ucasMode ?? diagnostics.ucasDetected);
   const diagnosticRows = [
     ["Backend patch", be.backendPatch],
     ["Backend route", be.routeName],
@@ -2900,21 +3089,28 @@ function renderDebugPanel(forceVisible = false) {
     ["UCAS complete", formatYesNo(diagnostics.ucasComplete)],
     ["UCAS job id", diagnostics.jobId],
     ["UCAS job status", diagnostics.jobStatus],
+    ["UCAS raw job status", diagnostics.rawJobStatus],
     ["UCAS phase", diagnostics.phase],
     ["Static only", formatYesNo(diagnostics.staticOnly)],
-    ["LLM used", formatYesNo(diagnostics.llmUsed)],
-    ["Playwright used", formatYesNo(diagnostics.playwrightUsed)],
+    ["LLM used", isUcasDiagnostics ? "" : formatYesNo(diagnostics.llmUsed)],
+    ["Playwright used", isUcasDiagnostics ? "" : formatYesNo(diagnostics.playwrightUsed)],
     ["Expected UCAS results", diagnostics.expectedResultCount],
     ["UCAS rows collected", diagnostics.rowsCollected],
     ["UCAS rows output", diagnostics.rowsOutput],
     ["Unique UCAS courses", diagnostics.uniqueCourses],
     ["Listing pages fetched", diagnostics.listingPagesFetched],
     ["Listing pages expected", diagnostics.listingPagesExpected],
+    ["Current listing page", diagnostics.currentListingPage],
+    ["Next listing URL", diagnostics.nextListingUrl],
     ["Pagination stopped reason", diagnostics.paginationStoppedReason],
     ["Fee pages completed", diagnostics.feePagesCompleted],
     ["Fee pages remaining", diagnostics.feePagesRemaining],
+    ["Fee details attempted", diagnostics.feeDetailsAttempted],
+    ["Fee queue length", diagnostics.feeQueueLength],
+    ["Fee completed count", diagnostics.feeCompletedCount],
     ["UCAS waiting", formatYesNo(diagnostics.waiting)],
     ["UCAS rate limited", formatYesNo(diagnostics.rateLimited)],
+    ["Rate-limit attempts", diagnostics.rateLimitAttemptCount],
     ["Next retry", diagnostics.nextRetryAt],
     ["Estimated remaining", diagnostics.estimatedRemainingTime],
     ["Fees found", diagnostics.feeFoundCount],
@@ -2942,7 +3138,7 @@ function renderDebugPanel(forceVisible = false) {
     `<div><span class="debug-k">Backend preparser ran</span> ${be.preparserRan ? "yes" : "no"}</div>`,
     be.markdownCharsBeforePreparser ? `<div><span class="debug-k">Markdown before preparser</span> ${Number(be.markdownCharsBeforePreparser).toLocaleString()} chars</div>` : "",
     be.markdownCharsAfterPreparser ? `<div><span class="debug-k">Markdown after preparser</span> ${Number(be.markdownCharsAfterPreparser).toLocaleString()} chars</div>` : "",
-    be.modelUsed ? `<div><span class="debug-k">Model used</span> ${esc(be.modelUsed)}</div>` : "",
+    !isUcasDiagnostics && be.modelUsed ? `<div><span class="debug-k">Model used</span> ${esc(be.modelUsed)}</div>` : "",
     `<div><span class="debug-k">Final content source</span> ${esc(be.source || rd.finalSource || "backend")}</div>`,
     stats.snapshotChosen ? `<div><span class="debug-k">Snapshot chosen</span> ${esc(stats.snapshotChosen)}</div>` : "",
     stats.initialSnapshotScore !== undefined ? `<div><span class="debug-k">Initial snapshot score</span> ${stats.initialSnapshotScore}</div>` : "",
@@ -3931,18 +4127,17 @@ function renderUcasTable(rows) {
 
   tableBody.innerHTML = rows.map((row, i) => `
     <tr>
-      <td class="col-num">${i + 1}</td>
-      <td class="name-cell"><span class="cell-clamp">${catalogCell(row.programName)}</span></td>
-      <td class="qualification-cell">${catalogCell(row.qualification)}</td>
-      <td class="provider-cell">${catalogCell(row.universityProvider)}</td>
+      <td class="name-cell">${clampedCatalogCell(row.programName)}</td>
+      <td class="qualification-cell">${clampedCatalogCell(row.qualification)}</td>
+      <td class="provider-cell">${clampedCatalogCell(row.universityProvider)}</td>
       <td class="ucas-points-cell">${catalogCell(row.ucasPoints)}</td>
-      <td class="fee-cell">${catalogCell(row.fee)}</td>
-      <td class="fee-status-cell">${catalogCell(row.feeStatus)}</td>
-      <td>${catalogCell(row.studyMode)}</td>
-      <td>${catalogCell(row.duration)}</td>
-      <td>${catalogCell(row.startDate)}</td>
-      <td>${catalogCell(row.location)}</td>
-      <td class="catalog-url-cell">${catalogUrlCell(row.courseUrl)}</td>
+      <td class="fee-cell">${clampedCatalogCell(row.fee)}</td>
+      <td class="fee-status-cell">${clampedCatalogCell(row.feeStatus)}</td>
+      <td>${clampedCatalogCell(row.studyMode)}</td>
+      <td>${clampedCatalogCell(row.duration)}</td>
+      <td>${clampedCatalogCell(row.startDate)}</td>
+      <td>${clampedCatalogCell(row.location)}</td>
+      <td class="catalog-url-cell">${catalogUrlCell(row.courseUrl, { clamp: true })}</td>
     </tr>
   `).join("");
 }
@@ -3953,10 +4148,17 @@ function catalogCell(value) {
     : '<span class="nil">-</span>';
 }
 
-function catalogUrlCell(value) {
+function clampedCatalogCell(value) {
+  return value === 0 || (value !== undefined && value !== null && String(value).trim() !== "")
+    ? `<span class="cell-clamp table-cell-clamp">${esc(value)}</span>`
+    : '<span class="nil">-</span>';
+}
+
+function catalogUrlCell(value, options = {}) {
   if (!value) return '<span class="nil">-</span>';
   const safeUrl = esc(value);
-  return `<a class="url-link" href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>`;
+  const className = options.clamp ? "url-link url-cell-clamp" : "url-link";
+  return `<a class="${className}" href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>`;
 }
 
 function feeCell(p) {

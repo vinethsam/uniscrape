@@ -49,8 +49,11 @@ test("does not treat programme candidates as final rows", () => {
 test("detects only supported UCAS course and search URLs", () => {
   assert.equal(isUcasUrl("https://www.ucas.com/explore/search/courses?query=law"), true);
   assert.equal(isUcasUrl("https://ucas.com/explore/search/all?page=2"), true);
+  assert.equal(isUcasUrl("https://www.ucas.com/explore/search/courses-beta?query=law"), true);
   assert.equal(isUcasUrl("https://www.ucas.com/explore/courses/ABC123"), true);
   assert.equal(isUcasUrl("https://www.ucas.com/explore/search/providers"), false);
+  assert.equal(isUcasUrl("https://www.ucas.com/explore/search/courses-not-real"), false);
+  assert.equal(isUcasUrl("https://www.ucas.com.evil.test/explore/search/courses"), false);
   assert.equal(isUcasUrl("https://example.com/search?q=ucas"), false);
   assert.equal(isUcasUrl("not a URL"), false);
 });
@@ -112,4 +115,28 @@ test("detects UCAS security diagnostics without treating them as an empty page",
   assert.deepEqual(getUcasDiagnostics(response).blockedPageUrls, [
     "https://www.ucas.com/explore/search/courses?page=2",
   ]);
+});
+
+test("normalises mixed UCAS retry diagnostics", () => {
+  const diagnostics = getUcasDiagnostics({
+    diagnostics: {
+      ucasMode: true,
+      jobStatus: "rate_limited",
+      jobPhase: "waiting",
+      ucasRateLimited: true,
+      next_retry_at: "2026-06-25T12:05:00Z",
+      rateLimitAttemptCount: 2,
+      currentListingPage: 2,
+      nextListingUrl: "https://www.ucas.com/explore/search/courses?page=2",
+      feeQueueLength: 12,
+      feeDetailsAttempted: 0,
+      feeCompletedCount: 0,
+    },
+  });
+
+  assert.equal(diagnostics.ucasRateLimited, true);
+  assert.equal(diagnostics.next_retry_at, "2026-06-25T12:05:00Z");
+  assert.equal(diagnostics.rateLimitAttemptCount, 2);
+  assert.equal(diagnostics.currentListingPage, 2);
+  assert.equal(diagnostics.feeQueueLength, 12);
 });

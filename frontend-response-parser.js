@@ -1,9 +1,17 @@
 (function attachUniScrapeResponseParser(root) {
   const UCAS_PATH_PREFIXES = [
+    "/explore/search/courses-beta",
     "/explore/search/courses",
     "/explore/search/all",
     "/explore/courses/",
   ];
+
+  function pathStartsWithAllowedPrefix(pathname, prefix) {
+    if (!pathname.startsWith(prefix)) return false;
+    if (prefix.endsWith("/")) return true;
+    const nextChar = pathname.charAt(prefix.length);
+    return nextChar === "" || nextChar === "/";
+  }
 
   function isUcasUrl(inputUrl) {
     try {
@@ -14,7 +22,7 @@
       return (
         (parsed.protocol === "https:" || parsed.protocol === "http:") &&
         (hostname === "ucas.com" || hostname === "www.ucas.com") &&
-        UCAS_PATH_PREFIXES.some(prefix => pathname.startsWith(prefix))
+        UCAS_PATH_PREFIXES.some(prefix => pathStartsWithAllowedPrefix(pathname, prefix))
       );
     } catch {
       return false;
@@ -93,8 +101,22 @@
       "fee_pages_completed",
       "feePagesRemaining",
       "fee_pages_remaining",
+      "feeQueueLength",
+      "fee_queue_length",
+      "feeDetailsAttempted",
+      "fee_details_attempted",
+      "feeCompletedCount",
+      "fee_completed_count",
       "rateLimited",
       "rate_limited",
+      "ucasRateLimited",
+      "ucas_rate_limited",
+      "rateLimitAttemptCount",
+      "rate_limit_attempt_count",
+      "currentListingPage",
+      "current_listing_page",
+      "nextListingUrl",
+      "next_listing_url",
       "waiting",
       "nextRetryAt",
       "next_retry_at",
@@ -106,7 +128,7 @@
       const values = responseValues(result, key);
       let value = values[0];
 
-      if (["ucasMode", "ucasDetected", "staticOnly", "partial", "securityPageDetected", "rateLimited", "rate_limited", "waiting"].includes(key)) {
+      if (["ucasMode", "ucasDetected", "staticOnly", "partial", "securityPageDetected", "rateLimited", "rate_limited", "ucasRateLimited", "ucas_rate_limited", "waiting"].includes(key)) {
         if (values.some(isTrue)) value = true;
       } else if (key === "ucasComplete" && values.some(item => item === false || String(item).toLowerCase() === "false")) {
         value = false;

@@ -131,18 +131,44 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 return
 
             job["polls"] += 1
-            waiting = "rate-limit-fixture" in str(job["payload"].get("url") or "") and job["polls"] == 1
-            status = "rate_limited" if waiting else "complete"
+            source_url = str(job["payload"].get("url") or "")
+            multi_retry = "multi-retry-fixture" in source_url
+            if multi_retry and job["polls"] == 1:
+                status = "rate_limited"
+                waiting = True
+                phase = "UCAS rate-limit detected on listing page 2"
+                next_retry_at = "2026-06-25T12:00:00Z"
+                attempt_count = 1
+            elif multi_retry and job["polls"] == 2:
+                status = "failed"
+                waiting = True
+                phase = "Retry attempt failed - waiting before retry"
+                next_retry_at = "2026-06-25T12:05:00Z"
+                attempt_count = 2
+            else:
+                waiting = "rate-limit-fixture" in source_url and job["polls"] == 1
+                status = "rate_limited" if waiting else "complete"
+                phase = "UCAS rate-limit detected - waiting before retry" if waiting else "Preparing UCAS catalog"
+                next_retry_at = "2026-06-25T12:00:00Z" if waiting else ""
+                attempt_count = 1 if waiting else 0
             self.send_json(200, {
                 "job_id": job_id,
                 "status": status,
-                "phase": "UCAS rate-limit detected - waiting before retry" if waiting else "Preparing UCAS catalog",
-                "expectedResultCount": 1,
-                "rowsCollected": 1,
+                "phase": phase,
+                "waiting": waiting,
+                "ucasRateLimited": waiting,
+                "expectedResultCount": 44 if multi_retry else 1,
+                "rowsCollected": 24 if multi_retry and waiting else 1,
                 "listingPagesFetched": 1,
+                "currentListingPage": 2 if waiting else "",
+                "nextListingUrl": "https://www.ucas.com/explore/search/courses?page=2" if waiting else "",
+                "rateLimitAttemptCount": attempt_count or "",
                 "feePagesCompleted": 1 if not waiting else 0,
                 "feePagesRemaining": 0 if not waiting else 1,
-                "nextRetryAt": "2026-06-25T12:00:00Z" if waiting else "",
+                "feeQueueLength": 1 if waiting else 0,
+                "feeDetailsAttempted": 0 if waiting else 1,
+                "feeCompletedCount": 0 if waiting else 1,
+                "nextRetryAt": next_retry_at,
                 "catalogRows": response_for(job["payload"])["catalogRows"],
             })
             return
