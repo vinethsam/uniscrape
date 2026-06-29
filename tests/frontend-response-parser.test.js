@@ -2,7 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   getFinalRowsFromResponse,
+  getUniversalDiagnostics,
   getUcasDiagnostics,
+  hasUniversalDiagnostics,
   hasUcasSecurityPage,
   isUcasResponse,
   isUcasUrl,
@@ -171,4 +173,87 @@ test("normalises mixed UCAS retry diagnostics", () => {
   assert.equal(diagnostics.rateLimitAttemptCount, 2);
   assert.equal(diagnostics.currentListingPage, 2);
   assert.equal(diagnostics.feeQueueLength, 12);
+});
+
+test("normalises universal queue diagnostics without UCAS classification", () => {
+  const diagnostics = getUniversalDiagnostics({
+    diagnostics: {
+      status: "running",
+      job_phase: "detail_fetch",
+      source_type: "universal",
+      seed_page_type: "programme_listing",
+      listing_pages_fetched: 3,
+      detail_pages_queued: 12,
+      detail_pages_fetched: 5,
+      detail_pages_succeeded: 4,
+      detail_pages_failed: 1,
+      enrichment_queue_length: 2,
+      completion_status: "in_progress",
+      completion_reasons: ["detail_timeout"],
+      current_url: "https://example.edu/courses",
+      estimated_remaining_seconds: 90,
+    },
+  });
+
+  assert.equal(hasUniversalDiagnostics(diagnostics), true);
+  assert.equal(diagnostics.sourceMode, "universal");
+  assert.equal(diagnostics.jobStatus, "running");
+  assert.equal(diagnostics.phase, "detail_fetch");
+  assert.equal(diagnostics.seedPageType, "programme_listing");
+  assert.equal(diagnostics.detailPagesSucceeded, 4);
+  assert.deepEqual(diagnostics.completionReasons, ["detail_timeout"]);
+});
+
+test("normalises direct detail universal diagnostics", () => {
+  const diagnostics = getUniversalDiagnostics({
+    frontendDiagnostics: {
+      directDetailMode: true,
+      seedPageType: "programme_detail",
+      universalComplete: false,
+      partial: true,
+    },
+  });
+
+  assert.equal(hasUniversalDiagnostics(diagnostics), true);
+  assert.equal(diagnostics.directDetailMode, true);
+  assert.equal(diagnostics.seedPageType, "programme_detail");
+  assert.equal(diagnostics.universalComplete, false);
+  assert.equal(diagnostics.partial, true);
+});
+
+test("does not classify UCAS diagnostics as universal diagnostics", () => {
+  const diagnostics = getUniversalDiagnostics({
+    diagnostics: {
+      ucasMode: true,
+      jobStatus: "rate_limited",
+      seedPageType: "programme_listing",
+    },
+  });
+
+  assert.equal(hasUniversalDiagnostics(diagnostics), false);
+});
+
+test("does not classify a plain status-only response as universal diagnostics", () => {
+  const diagnostics = getUniversalDiagnostics({
+    status: "ok",
+  });
+
+  assert.equal(hasUniversalDiagnostics(diagnostics), false);
+});
+
+test("reads universal diagnostics from nested job progress payloads", () => {
+  const diagnostics = getUniversalDiagnostics({
+    data: {
+      progress: {
+        jobStatus: "running",
+        jobPhase: "pagination",
+        paginationQueueLength: 3,
+      },
+    },
+  });
+
+  assert.equal(hasUniversalDiagnostics(diagnostics), true);
+  assert.equal(diagnostics.jobStatus, "running");
+  assert.equal(diagnostics.phase, "pagination");
+  assert.equal(diagnostics.paginationQueueLength, 3);
 });

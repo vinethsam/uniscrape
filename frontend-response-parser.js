@@ -30,13 +30,28 @@
   }
 
   function responseSources(result) {
-    return [
+    const sources = [
       result?.frontendDiagnostics,
       result?.diagnostics,
       result?.metadata,
       result?.responseMeta,
+      result?.job,
+      result?.progress,
+      result?.metrics,
+      result?.stats,
+      result?.data,
+      result?.data?.frontendDiagnostics,
+      result?.data?.diagnostics,
+      result?.data?.metadata,
+      result?.data?.responseMeta,
+      result?.data?.job,
+      result?.data?.progress,
+      result?.data?.metrics,
+      result?.data?.stats,
       result,
     ].filter(source => source && typeof source === "object");
+
+    return sources.filter((source, index) => sources.indexOf(source) === index);
   }
 
   function firstResponseValue(result, keys) {
@@ -179,6 +194,117 @@
     }
 
     return diagnostics;
+  }
+
+  const UNIVERSAL_DIAGNOSTIC_ALIASES = Object.freeze([
+    ["jobId", ["jobId", "job_id", "id"]],
+    ["jobStatus", ["jobStatus", "job_status", "status", "state"]],
+    ["phase", ["jobPhase", "job_phase", "phase", "currentPhase", "current_phase", "stage", "step"]],
+    ["sourceType", ["sourceType", "source_type", "scraperSourceType", "scraper_source_type"]],
+    ["seedPageType", ["seedPageType", "seed_page_type", "pageType", "page_type"]],
+    ["directDetailMode", ["directDetailMode", "direct_detail_mode"]],
+    ["listingQueueLength", ["listingQueueLength", "listing_queue_length"]],
+    ["paginationQueueLength", ["paginationQueueLength", "pagination_queue_length"]],
+    ["detailQueueLength", ["detailQueueLength", "detail_queue_length"]],
+    ["enrichmentQueueLength", ["enrichmentQueueLength", "enrichment_queue_length"]],
+    ["listingPagesFetched", ["listingPagesFetched", "listing_pages_fetched"]],
+    ["detailPagesQueued", ["detailPagesQueued", "detail_pages_queued"]],
+    ["detailPagesFetched", ["detailPagesFetched", "detail_pages_fetched", "detailsAttempted", "detailPagesAttempted"]],
+    ["detailPagesSucceeded", ["detailPagesSucceeded", "detail_pages_succeeded", "detailsSucceeded"]],
+    ["detailPagesFailed", ["detailPagesFailed", "detail_pages_failed", "detailsFailed"]],
+    ["detailPagesSkipped", ["detailPagesSkipped", "detail_pages_skipped", "detailsSkipped"]],
+    ["enrichmentPagesFetched", ["enrichmentPagesFetched", "enrichment_pages_fetched"]],
+    ["completionStatus", ["completionStatus", "completion_status"]],
+    ["universalComplete", ["universalComplete", "universal_complete", "complete", "completed"]],
+    ["partial", ["partial", "isPartial", "is_partial"]],
+    ["completionReasons", ["completionReasons", "completion_reasons", "partialReasons", "partial_reasons"]],
+    ["currentUrl", ["currentUrl", "current_url", "currentTargetUrl", "current_target_url"]],
+    ["nextUrl", ["nextUrl", "next_url", "nextTargetUrl", "next_target_url"]],
+    ["currentDelaySeconds", ["currentDelaySeconds", "current_delay_seconds", "delaySeconds", "delay_seconds"]],
+    ["estimatedRemainingSeconds", ["estimatedRemainingSeconds", "estimated_remaining_seconds", "etaSeconds", "eta_seconds"]],
+    ["completedUrls", ["completedUrls", "completed_urls"]],
+    ["failedUrls", ["failedUrls", "failed_urls"]],
+    ["skippedUrls", ["skippedUrls", "skipped_urls"]],
+    ["rowRejectionReasons", ["rowRejectionReasons", "row_rejection_reasons"]],
+    ["pageTypeClassifierReasons", ["pageTypeClassifierReasons", "page_type_classifier_reasons", "classifierReasons", "classifier_reasons"]],
+    ["fieldCoverage", ["fieldCoverage", "field_coverage"]],
+    ["provenanceSummary", ["provenanceSummary", "provenance_summary"]],
+  ]);
+
+  function getUniversalDiagnostics(result) {
+    const diagnostics = {};
+
+    UNIVERSAL_DIAGNOSTIC_ALIASES.forEach(([canonicalKey, aliases]) => {
+      const value = firstResponseValue(result, aliases);
+      if (value !== undefined && value !== null) diagnostics[canonicalKey] = value;
+    });
+
+    if (["directDetailMode", "direct_detail_mode"].some(key => responseValues(result, key).some(isTrue))) {
+      diagnostics.directDetailMode = true;
+    }
+
+    if (["partial", "isPartial", "is_partial"].some(key => responseValues(result, key).some(isTrue))) {
+      diagnostics.partial = true;
+    }
+
+    if (["universalComplete", "universal_complete", "complete", "completed"].some(key => responseValues(result, key).some(isTrue))) {
+      diagnostics.universalComplete = true;
+    } else if (responseValues(result, "universalComplete").some(value => value === false || String(value).toLowerCase() === "false")) {
+      diagnostics.universalComplete = false;
+    }
+
+    const ucasMode = responseSources(result).some(source =>
+      isTrue(source.ucasMode) || isTrue(source.ucasDetected)
+    );
+    if (ucasMode) return {};
+
+    if (hasUniversalDiagnostics(diagnostics)) {
+      diagnostics.sourceMode = "universal";
+    }
+
+    return diagnostics;
+  }
+
+  function hasUniversalDiagnostics(diagnosticsOrResult) {
+    const diagnostics = diagnosticsOrResult && diagnosticsOrResult.sourceMode === "universal"
+      ? diagnosticsOrResult
+      : diagnosticsOrResult && (
+          diagnosticsOrResult.frontendDiagnostics ||
+          diagnosticsOrResult.diagnostics ||
+          diagnosticsOrResult.responseMeta ||
+          diagnosticsOrResult.metadata
+        )
+        ? getUniversalDiagnostics(diagnosticsOrResult)
+        : diagnosticsOrResult || {};
+
+    const strongSignals = [
+      "jobId",
+      "sourceType",
+      "seedPageType",
+      "directDetailMode",
+      "listingQueueLength",
+      "paginationQueueLength",
+      "detailQueueLength",
+      "enrichmentQueueLength",
+      "completionStatus",
+      "universalComplete",
+      "completionReasons",
+      "currentUrl",
+      "nextUrl",
+    ];
+
+    const hasStrongSignal = strongSignals.some(key =>
+      diagnostics[key] !== undefined && diagnostics[key] !== null && diagnostics[key] !== ""
+    );
+    const hasStatusAndPhase =
+      diagnostics.jobStatus !== undefined &&
+      diagnostics.jobStatus !== null &&
+      diagnostics.jobStatus !== "" &&
+      diagnostics.phase !== undefined &&
+      diagnostics.phase !== null &&
+      diagnostics.phase !== "";
+
+    return hasStrongSignal || hasStatusAndPhase;
   }
 
   function hasUcasSecurityPage(result) {
@@ -371,7 +497,9 @@
 
   const api = Object.freeze({
     getFinalRowsFromResponse,
+    getUniversalDiagnostics,
     getUcasDiagnostics,
+    hasUniversalDiagnostics,
     hasUcasSecurityPage,
     isUcasResponse,
     isUcasUrl,

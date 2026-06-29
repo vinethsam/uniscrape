@@ -5,12 +5,15 @@
 // Backend extraction config
 const EXTRACT_API_URL = "https://api.uniscrape.com/crawl";
 const UCAS_JOBS_API_URL = new URL("/ucas/jobs", EXTRACT_API_URL).toString();
+const UNIVERSAL_JOBS_API_URL = new URL("/jobs", EXTRACT_API_URL).toString();
 const FRONTEND_BUILD_MARKER = "frontend_response_parser_trace_v1";
 console.debug("[uniscrape] frontend build", FRONTEND_BUILD_MARKER);
 
 const {
   getFinalRowsFromResponse,
+  getUniversalDiagnostics,
   getUcasDiagnostics,
+  hasUniversalDiagnostics,
   hasUcasSecurityPage,
   isUcasResponse,
   isUcasUrl,
@@ -19,7 +22,9 @@ const {
 
 if (
   typeof getFinalRowsFromResponse !== "function" ||
+  typeof getUniversalDiagnostics !== "function" ||
   typeof getUcasDiagnostics !== "function" ||
+  typeof hasUniversalDiagnostics !== "function" ||
   typeof hasUcasSecurityPage !== "function" ||
   typeof isUcasResponse !== "function" ||
   typeof isUcasUrl !== "function" ||
@@ -42,6 +47,9 @@ const UCAS_JOB_REQUEST_TIMEOUT_MS = 30000;
 const UCAS_JOB_RUNNING_POLL_MS = 4000;
 const UCAS_JOB_WAITING_POLL_MIN_MS = 5000;
 const UCAS_JOB_WAITING_POLL_MAX_MS = 15000;
+const UNIVERSAL_JOB_REQUEST_TIMEOUT_MS = 30000;
+const UNIVERSAL_JOB_RUNNING_POLL_MS = 4000;
+const UNIVERSAL_JOB_WAITING_POLL_MS = 8000;
 const VERIFY_ACCESS_TIMEOUT_MS = 15000;
 const UNISCRAPE_ACCESS_CODE_KEY = "uniscrape.accessCode";
 const LEGACY_UNISCRAPE_ACCESS_KEY_KEY = "uniscrape.accessKey";
@@ -87,6 +95,7 @@ let pendingScrapeAction = null;
 let googleIdentityInitialized = false;
 let signInSucceededThisAttempt = false;
 let activeUcasJob = null;
+let activeUniversalJob = null;
 
 let debugState = {
   rawHtml: "",
@@ -268,7 +277,8 @@ const AUDIT_CSV_COLUMNS = [
   "entry_ielts", "entry_toefl", "entry_pte", "entry_duolingo", "entry_cambridge", "entry_other_english",
   "entry_gre", "entry_gmat", "entry_work_experience",
   "rec_letter", "personal_statement", "portfolio", "interview",
-  "accreditation", "description", "url"
+  "accreditation", "description", "url",
+  "source_url", "listing_url", "detail_url", "enrichment_urls", "field_sources", "discovered_from"
 ];
 
 const CATALOG_CSV_COLUMNS = [
@@ -282,7 +292,13 @@ const CATALOG_CSV_COLUMNS = [
   "fees",
   "location",
   "language",
-  "modeOfStudy"
+  "modeOfStudy",
+  "sourceUrl",
+  "listingUrl",
+  "detailUrl",
+  "enrichmentUrls",
+  "fieldSources",
+  "discoveredFrom"
 ];
 
 const UCAS_CSV_COLUMNS = [
@@ -1124,6 +1140,16 @@ function isUcasJobUnavailableError(error) {
   return error?.code === "UCAS_JOB_ROUTE_UNAVAILABLE";
 }
 
+function createUniversalJobUnavailableError(message = "Universal job route is unavailable.") {
+  const error = new Error(message);
+  error.code = "UNIVERSAL_JOB_ROUTE_UNAVAILABLE";
+  return error;
+}
+
+function isUniversalJobUnavailableError(error) {
+  return error?.code === "UNIVERSAL_JOB_ROUTE_UNAVAILABLE";
+}
+
 function readBackendAuthError(res, data, fallbackMessage) {
   const backendDetail = String(data?.detail || data?.message || "");
   if (res.status === 401 || res.status === 403) {
@@ -1892,10 +1918,7 @@ function buildUcasJobResult(jobId, statusPayload, resultsPayload, latestRows, so
 }
 
 function setUcasJobActionsVisible(isVisible) {
-  ucasJobActions?.classList.toggle("hidden", !isVisible);
-  if (!ucasJobCancelBtn) return;
-  ucasJobCancelBtn.disabled = !isVisible;
-  ucasJobCancelBtn.textContent = "Cancel UCAS job";
+  setJobActionsVisible(isVisible, "Cancel UCAS job");
 }
 
 function mergeSeedUrls(seedUrls, url) {
@@ -2070,6 +2093,41 @@ async function handleUcasJobCancelClick() {
   }
 }
 
+async function handleUniversalJobCancelClick() {
+  if (!activeUniversalJob?.jobId || activeUniversalJob.cancelRequested) return;
+
+  activeUniversalJob.cancelRequested = true;
+  if (ucasJobCancelBtn) {
+    ucasJobCancelBtn.disabled = true;
+    ucasJobCancelBtn.textContent = "Cancelling...";
+  }
+  showStatus("Cancelling extraction job", Math.max(lastStatusProgress, 40));
+
+  try {
+    await cancelUniversalJob(activeUniversalJob.jobId);
+  } catch (error) {
+    if (isUniversalJobUnavailableError(error)) {
+      showWarning("Job cancellation is not available on this backend.");
+    } else {
+      showWarning("Could not cancel the job. It may already be finishing.");
+    }
+    if (ucasJobCancelBtn) {
+      ucasJobCancelBtn.disabled = false;
+      ucasJobCancelBtn.textContent = "Cancel job";
+    }
+  }
+}
+
+function handleActiveJobCancelClick() {
+  if (activeUcasJob?.jobId) {
+    handleUcasJobCancelClick();
+    return;
+  }
+  if (activeUniversalJob?.jobId) {
+    handleUniversalJobCancelClick();
+  }
+}
+
 async function cancelUcasJob(jobId) {
   const res = await fetch(getUcasJobUrl(jobId, "/cancel"), {
     method: "POST",
@@ -2089,6 +2147,486 @@ async function cancelUcasJob(jobId) {
   }
 
   return data;
+}
+
+function buildUniversalJobPayload(request) {
+  return buildBackendExtractPayload(
+    request.url,
+    request.debugOnly,
+    request.catalogMode,
+    request.depthOne,
+  );
+}
+
+function getUniversalJobUrl(jobId, suffix = "") {
+  const encodedJobId = encodeURIComponent(jobId);
+  return `${UNIVERSAL_JOBS_API_URL}/${encodedJobId}${suffix}`;
+}
+
+async function startUniversalJob(request) {
+  let res;
+  try {
+    res = await fetch(UNIVERSAL_JOBS_API_URL, {
+      method: "POST",
+      headers: buildAuthorizedJsonHeaders(),
+      body: JSON.stringify(buildUniversalJobPayload(request)),
+      signal: AbortSignal.timeout(UNIVERSAL_JOB_REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" || error instanceof TypeError) {
+      throw createUniversalJobUnavailableError("Universal job route could not be reached.");
+    }
+    throw error;
+  }
+
+  const data = await readJsonResponse(res);
+  readBackendAuthError(res, data, "Your session is not authorised for extraction.");
+
+  if ([404, 405, 501].includes(res.status)) {
+    throw createUniversalJobUnavailableError(data?.detail || "Universal job route is unavailable.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "Universal job could not be started with HTTP " + res.status);
+  }
+
+  const jobId = getJobIdFromPayload(data);
+  if (!jobId) {
+    throw createUniversalJobUnavailableError("Universal job route did not return a job id.");
+  }
+
+  return { ...data, job_id: jobId };
+}
+
+async function fetchUniversalJobStatus(jobId) {
+  const res = await fetch(getUniversalJobUrl(jobId), {
+    method: "GET",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UNIVERSAL_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for extraction.");
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "Universal job status failed with HTTP " + res.status);
+  }
+
+  return { ...data, job_id: getJobIdFromPayload(data) || jobId };
+}
+
+async function fetchUniversalJobResults(jobId) {
+  const res = await fetch(getUniversalJobUrl(jobId, "/results"), {
+    method: "GET",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UNIVERSAL_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for extraction.");
+
+  if ([404, 405, 501].includes(res.status)) return null;
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "Universal job results failed with HTTP " + res.status);
+  }
+
+  return data;
+}
+
+async function cancelUniversalJob(jobId) {
+  const res = await fetch(getUniversalJobUrl(jobId, "/cancel"), {
+    method: "POST",
+    headers: buildAuthorizedJsonHeaders(),
+    signal: AbortSignal.timeout(UNIVERSAL_JOB_REQUEST_TIMEOUT_MS),
+  });
+  const data = await readJsonResponse(res);
+
+  readBackendAuthError(res, data, "Your session is not authorised for extraction.");
+
+  if ([404, 405, 501].includes(res.status)) {
+    throw createUniversalJobUnavailableError(data?.detail || "Universal job cancellation is unavailable.");
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.message || "Universal job cancellation failed with HTTP " + res.status);
+  }
+
+  return data;
+}
+
+function normalizeUniversalJobStatus(value) {
+  const status = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    completed: "complete",
+    success: "complete",
+    succeeded: "complete",
+    done: "complete",
+    canceled: "cancelled",
+    canceling: "cancelled",
+    in_progress: "running",
+    processing: "running",
+    retry_wait: "waiting",
+    backoff: "waiting",
+  };
+  return aliases[status] || status || "running";
+}
+
+function getUniversalRawJobStatus(payloads) {
+  return normalizeUniversalJobStatus(firstJobValue(payloads, [
+    "status",
+    "state",
+    "job_status",
+    "jobStatus",
+    "completion_status",
+    "completionStatus",
+  ]));
+}
+
+function getUniversalJobStatus(payloads, options = {}) {
+  const rawStatus = getUniversalRawJobStatus(payloads);
+  const waiting = firstJobBoolean(payloads, ["waiting", "is_waiting", "isWaiting"]);
+
+  if (rawStatus === "cancelled" && options.cancelRequested !== true) return "failed";
+  if (waiting && !["complete", "failed", "cancelled", "partial"].includes(rawStatus)) return "waiting";
+  return rawStatus;
+}
+
+function isUniversalJobTerminal(status) {
+  return ["complete", "failed", "cancelled", "partial"].includes(normalizeUniversalJobStatus(status));
+}
+
+function humanizeUniversalPhase(value, status = "", diagnostics = {}) {
+  const normalizedStatus = normalizeUniversalJobStatus(status);
+  const phase = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+
+  if (diagnostics.directDetailMode || diagnostics.seedPageType === "programme_detail") {
+    if (normalizedStatus === "queued") return "Direct programme page detected";
+    if (phase.includes("validat")) return "Validating completeness";
+    if (phase.includes("prepar")) return "Preparing results";
+    return "Extracting one programme from the provided detail page";
+  }
+
+  if (normalizedStatus === "queued") return "Classifying page type";
+  if (normalizedStatus === "partial") return "Partial extraction - review diagnostics";
+  if (normalizedStatus === "complete") return "Preparing results";
+  if (normalizedStatus === "failed") return "Extraction failed";
+  if (normalizedStatus === "cancelled") return "Extraction cancelled";
+  if (phase.includes("classif")) return "Classifying page type";
+  if (phase.includes("pagination")) return "Checking pagination";
+  if (phase.includes("link") || phase.includes("collect")) return "Collecting programme links";
+  if (phase.includes("detail")) return "Fetching detail pages";
+  if (phase.includes("enrich")) return "Enriching missing fields";
+  if (phase.includes("validat") || phase.includes("complete")) return "Validating completeness";
+  if (phase.includes("prepar") || phase.includes("result")) return "Preparing results";
+  if (phase.includes("listing") || phase.includes("seed")) return "Reading listing page";
+
+  return value ? String(value) : "Reading listing page";
+}
+
+function getUniversalDiagnosticsFromPayloads(payloads) {
+  return payloads.reduce((merged, payload) => ({
+    ...merged,
+    ...getUniversalDiagnostics(payload),
+  }), {});
+}
+
+function getUniversalJobPhase(payloads, status) {
+  const diagnostics = getUniversalDiagnosticsFromPayloads(payloads);
+  const phase = firstJobValue(payloads, [
+    "job_phase",
+    "jobPhase",
+    "phase",
+    "current_phase",
+    "currentPhase",
+    "stage",
+    "step",
+    "message",
+  ]);
+
+  return humanizeUniversalPhase(phase, status, diagnostics);
+}
+
+function formatSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function formatUniversalJobProgressDetail(payloads, rowsLength, options = {}) {
+  const status = getUniversalJobStatus(payloads, options);
+  const diagnostics = getUniversalDiagnosticsFromPayloads(payloads);
+  const phase = getUniversalJobPhase(payloads, status);
+  const detailParts = [
+    `Status: ${status.replace(/_/g, " ")}`,
+    phase ? `Phase: ${phase}` : "",
+    diagnostics.seedPageType ? `Seed page type: ${diagnostics.seedPageType}` : "",
+    diagnostics.directDetailMode ? "Direct detail mode" : "",
+    `Rows collected: ${rowsLength || 0}`,
+    diagnostics.listingPagesFetched !== undefined ? `Listing pages fetched: ${diagnostics.listingPagesFetched}` : "",
+    diagnostics.detailPagesQueued !== undefined ? `Detail pages queued: ${diagnostics.detailPagesQueued}` : "",
+    diagnostics.detailPagesFetched !== undefined ? `Detail pages fetched: ${diagnostics.detailPagesFetched}` : "",
+    diagnostics.detailPagesSucceeded !== undefined ? `Detail pages succeeded: ${diagnostics.detailPagesSucceeded}` : "",
+    diagnostics.detailPagesFailed !== undefined ? `Detail pages failed: ${diagnostics.detailPagesFailed}` : "",
+    diagnostics.enrichmentQueueLength !== undefined ? `Enrichment queue: ${diagnostics.enrichmentQueueLength}` : "",
+    diagnostics.enrichmentPagesFetched !== undefined ? `Enrichment pages fetched: ${diagnostics.enrichmentPagesFetched}` : "",
+    diagnostics.completionStatus ? `Completion: ${diagnostics.completionStatus}` : "",
+    diagnostics.currentUrl ? `Current URL: ${diagnostics.currentUrl}` : "",
+    diagnostics.nextUrl ? `Next URL: ${diagnostics.nextUrl}` : "",
+    diagnostics.currentDelaySeconds !== undefined ? `Delay: ${formatSeconds(diagnostics.currentDelaySeconds)}` : "",
+    diagnostics.estimatedRemainingSeconds !== undefined ? `Estimated remaining: ${formatSeconds(diagnostics.estimatedRemainingSeconds)}` : "",
+  ];
+
+  return detailParts.filter(Boolean).join(" | ");
+}
+
+function getUniversalJobProgressPercent(payloads, rowsLength, options = {}) {
+  const explicitProgress = Number(firstJobValue(payloads, [
+    "progress_percent",
+    "progressPercent",
+    "percent",
+    "percentage",
+  ]));
+  if (Number.isFinite(explicitProgress) && explicitProgress >= 0) {
+    return Math.min(100, explicitProgress);
+  }
+
+  const status = getUniversalJobStatus(payloads, options);
+  if (status === "queued") return 10;
+  if (status === "complete") return 100;
+  if (status === "failed" || status === "cancelled") return Math.max(lastStatusProgress, rowsLength ? 86 : 38);
+  if (status === "partial") return Math.max(lastStatusProgress, 92);
+
+  const diagnostics = getUniversalDiagnosticsFromPayloads(payloads);
+  const completed = Number(diagnostics.detailPagesSucceeded || 0) + Number(diagnostics.detailPagesFailed || 0);
+  const queued = Number(diagnostics.detailPagesQueued || 0);
+  if (queued > 0) {
+    return Math.min(92, Math.max(22, Math.round((completed / queued) * 74) + 18));
+  }
+
+  return Math.max(lastStatusProgress, rowsLength ? 46 : 24);
+}
+
+function getUniversalPollDelay(payloads, options = {}) {
+  const status = getUniversalJobStatus(payloads, options);
+  return status === "waiting" ? UNIVERSAL_JOB_WAITING_POLL_MS : UNIVERSAL_JOB_RUNNING_POLL_MS;
+}
+
+function collectUniversalRowsFromPayload(payload, mode, depth = 0) {
+  if (!payload || depth > 3) return [];
+  if (Array.isArray(payload)) return payload;
+  if (typeof payload !== "object") return [];
+
+  const finalRows = getFinalRowsFromResponse(payload, mode);
+  if (finalRows.length) return finalRows;
+
+  const directKeys = [
+    "partialRows",
+    "partial_rows",
+    "resultRows",
+    "result_rows",
+    "rows",
+    "records",
+    "items",
+  ];
+  for (const key of directKeys) {
+    if (Array.isArray(payload[key]) && payload[key].length) return payload[key];
+  }
+
+  const nestedKeys = ["results", "result", "data", "payload", "job"];
+  for (const key of nestedKeys) {
+    const nestedRows = collectUniversalRowsFromPayload(payload[key], mode, depth + 1);
+    if (nestedRows.length) return nestedRows;
+  }
+
+  return [];
+}
+
+function getBestUniversalRowsFromPayloads(mode, ...payloads) {
+  for (const payload of payloads) {
+    const rows = collectUniversalRowsFromPayload(payload, mode);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+function normalizeAuditRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(row => applyFinancialAidStatement(mapSubjects({ ...row })));
+}
+
+function normalizeRowsForMode(rows, mode) {
+  if (mode === "catalog") return normalizeCatalogRows(rows);
+  return normalizeAuditRows(rows);
+}
+
+function buildUniversalJobDiagnostics(jobId, statusPayload, resultsPayload, rows, sourceUrl, options = {}) {
+  const payloads = [statusPayload, resultsPayload].filter(Boolean);
+  const status = getUniversalJobStatus(payloads, options);
+  const diagnostics = getUniversalDiagnosticsFromPayloads(payloads);
+
+  return {
+    ...diagnostics,
+    sourceMode: "universal",
+    jobId,
+    jobStatus: status,
+    rawJobStatus: getUniversalRawJobStatus(payloads),
+    phase: getUniversalJobPhase(payloads, status),
+    rowsOutput: rows.length,
+    sourceUrl,
+    partial: status === "failed" || status === "cancelled" || status === "partial"
+      ? true
+      : diagnostics.partial,
+    universalComplete: status === "complete"
+      ? (diagnostics.universalComplete ?? true)
+      : (diagnostics.universalComplete ?? false),
+  };
+}
+
+function buildUniversalJobResult(jobId, statusPayload, resultsPayload, latestRows, request, options = {}) {
+  const responseMode = request.catalogMode ? "catalog" : "audit";
+  const rows = getBestUniversalRowsFromPayloads(responseMode, resultsPayload, statusPayload, latestRows);
+  const diagnostics = buildUniversalJobDiagnostics(jobId, statusPayload, resultsPayload, rows, request.url, options);
+  const warnings = collectUcasWarnings(statusPayload, resultsPayload);
+  const resultRows = rows.length ? rows : latestRows;
+
+  return {
+    catalogRows: responseMode === "catalog" ? resultRows : [],
+    programs: responseMode === "audit" ? resultRows : [],
+    rows: resultRows,
+    diagnostics,
+    warnings,
+    partial: Boolean(diagnostics.partial),
+    responseMeta: {
+      backendPatch: "universal_jobs",
+      routeName: "universal_jobs",
+      rowCount: resultRows.length,
+      jobId,
+    },
+  };
+}
+
+function setJobActionsVisible(isVisible, label = "Cancel job") {
+  ucasJobActions?.classList.toggle("hidden", !isVisible);
+  if (!ucasJobCancelBtn) return;
+  ucasJobCancelBtn.disabled = !isVisible;
+  ucasJobCancelBtn.textContent = label;
+}
+
+function setUniversalJobActionsVisible(isVisible) {
+  setJobActionsVisible(isVisible, "Cancel job");
+}
+
+function renderUniversalJobRows(rawRows, request, baseState, statusPayload, resultsPayload, options = {}) {
+  const responseMode = request.catalogMode ? "catalog" : "audit";
+  const normalizedRows = tagRowsWithMode(normalizeRowsForMode(rawRows, responseMode), responseMode);
+  if (!normalizedRows.length) return;
+
+  const baseRows = Array.isArray(baseState?.rows) ? baseState.rows : [];
+  const baseMode = baseState?.mode || currentResultMode;
+  const displayMode = baseRows.length && baseMode ? baseMode : responseMode;
+
+  if (baseRows.length) {
+    const { rows } = appendUniqueRows(baseRows, normalizedRows, responseMode);
+    allPrograms = rows;
+  } else {
+    allPrograms = normalizedRows;
+  }
+
+  activeResultsMode = displayMode;
+  currentResultMode = displayMode;
+  currentUcasModeConfirmed = false;
+  appendedSeedUrls = mergeSeedUrls(baseState?.seedUrls, request.url);
+  renderResults(request.url);
+}
+
+function getUniversalPartialWarning(diagnostics, rowsLength) {
+  const reasons = Array.isArray(diagnostics.completionReasons)
+    ? diagnostics.completionReasons
+    : diagnostics.completionReasons
+      ? [diagnostics.completionReasons]
+      : [];
+  const reasonText = reasons.length ? ` Reasons: ${reasons.join(", ")}.` : "";
+
+  if (diagnostics.completionStatus && /cap|budget|timeout|limit/i.test(String(diagnostics.completionStatus))) {
+    return "Extraction stopped because a cap or runtime budget was reached. Rows returned so far are shown below.";
+  }
+
+  if (diagnostics.universalComplete === false && rowsLength) {
+    return `Extraction is partial - some detail pages failed or were skipped.${reasonText}`;
+  }
+
+  if (diagnostics.partial) {
+    return rowsLength
+      ? `Extraction is partial - review diagnostics before using this as final data.${reasonText}`
+      : `Extraction is partial - no usable rows were returned.${reasonText}`;
+  }
+
+  return "";
+}
+
+function showUniversalJobNotice(payloads, rowsLength) {
+  const diagnostics = getUniversalDiagnosticsFromPayloads(payloads);
+  const warning = getUniversalPartialWarning(diagnostics, rowsLength);
+  if (warning) showWarning(warning);
+}
+
+async function runUniversalJobExtraction(request, baseState) {
+  const started = await startUniversalJob(request);
+  const jobId = started.job_id;
+  const responseMode = request.catalogMode ? "catalog" : "audit";
+  let statusPayload = started;
+  let resultsPayload = null;
+  let latestRows = getBestUniversalRowsFromPayloads(responseMode, statusPayload);
+  let shouldFetchStatus = false;
+
+  activeUniversalJob = {
+    jobId,
+    cancelRequested: false,
+  };
+  setUniversalJobActionsVisible(true);
+
+  try {
+    while (true) {
+      if (shouldFetchStatus) {
+        statusPayload = await fetchUniversalJobStatus(jobId);
+      }
+      shouldFetchStatus = true;
+
+      try {
+        resultsPayload = await fetchUniversalJobResults(jobId);
+      } catch (resultsError) {
+        if (request.debugOnly) console.warn("Could not fetch universal job results yet.", resultsError);
+      }
+
+      latestRows = getBestUniversalRowsFromPayloads(responseMode, resultsPayload, statusPayload, latestRows);
+      const payloads = [statusPayload, resultsPayload].filter(Boolean);
+      const statusOptions = { cancelRequested: Boolean(activeUniversalJob?.cancelRequested) };
+      const status = getUniversalJobStatus(payloads, statusOptions);
+      const phase = getUniversalJobPhase(payloads, status);
+      const rowsLength = latestRows.length;
+
+      if (rowsLength) {
+        renderUniversalJobRows(latestRows, request, baseState, statusPayload, resultsPayload, statusOptions);
+      }
+
+      showStatus(phase, getUniversalJobProgressPercent(payloads, rowsLength, statusOptions));
+      setStatusDetail(formatUniversalJobProgressDetail(payloads, rowsLength, statusOptions));
+      showUniversalJobNotice(payloads, rowsLength);
+
+      if (isUniversalJobTerminal(status)) {
+        return buildUniversalJobResult(jobId, statusPayload, resultsPayload, latestRows, request, statusOptions);
+      }
+
+      await sleep(getUniversalPollDelay(payloads, statusOptions));
+    }
+  } finally {
+    activeUniversalJob = null;
+    setUniversalJobActionsVisible(false);
+  }
 }
 
 function updateDebugStateFromBackend(data) {
@@ -2170,7 +2708,7 @@ function installScopedZoomGuard() {
 scrapeBtn?.addEventListener("click", handleExtractClick);
 retryBtn?.addEventListener("click", () => { clearError(); handleExtractClick(); });
 appendBtn?.addEventListener("click", enterAppendMode);
-ucasJobCancelBtn?.addEventListener("click", handleUcasJobCancelClick);
+ucasJobCancelBtn?.addEventListener("click", handleActiveJobCancelClick);
 setUcasJobActionsVisible(false);
 urlInput?.addEventListener("keydown", e => {
   if (e.key === "Enter") {
@@ -2382,11 +2920,18 @@ async function runExtractionWithSession(request) {
         result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
       }
     } else {
-      result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+      try {
+        result = await runUniversalJobExtraction(request, baseResultState);
+      } catch (error) {
+        if (!isUniversalJobUnavailableError(error)) throw error;
+        result = await useBackendExtract(url, debugOnly, catalogMode, depthOne);
+      }
     }
     updateDebugStateFromBackend(result);
     const ucasConfirmed = isUcasResponse(result);
     const ucasDiagnostics = getUcasDiagnostics(result);
+    const universalDiagnostics = getUniversalDiagnostics(result);
+    const universalConfirmed = !ucasConfirmed && hasUniversalDiagnostics(universalDiagnostics);
     const responseMode = ucasConfirmed ? "ucas" : catalogMode ? "catalog" : "audit";
 
     currentUcasModeConfirmed = ucasConfirmed;
@@ -2399,6 +2944,11 @@ async function runExtractionWithSession(request) {
       stopStatusSequence();
       setStatusDetail("Static catalog extraction");
       showStatus("Validating UCAS completeness", 88);
+    } else if (universalConfirmed) {
+      stopStatusSequence();
+      const directDetail = universalDiagnostics.directDetailMode || universalDiagnostics.seedPageType === "programme_detail";
+      showStatus(directDetail ? "Direct programme page detected" : humanizeUniversalPhase(universalDiagnostics.phase, universalDiagnostics.jobStatus, universalDiagnostics), 88);
+      setStatusDetail(formatUniversalDiagnosticsSummary(universalDiagnostics));
     }
 
     const finalRows = getFinalRowsFromResponse(result, responseMode);
@@ -2444,6 +2994,14 @@ async function runExtractionWithSession(request) {
         ].join(" "));
       }
 
+      if (universalConfirmed && isIncompleteUniversalResponse(result)) {
+        hideStatus();
+        return showWarning([
+          ...warningMessages,
+          getUniversalResponseWarning(result, 0),
+        ].join(" "));
+      }
+
       const candidatesFound = Math.max(
         Number(diagnostics.candidateCount || 0),
         Number(result?.discoveredProgrammeCount || 0),
@@ -2469,6 +3027,8 @@ async function runExtractionWithSession(request) {
       warningMessages.push(
         "UCAS extraction incomplete - review diagnostics before using this as final data. Rows already extracted are shown below."
       );
+    } else if (universalConfirmed && isIncompleteUniversalResponse(result)) {
+      warningMessages.push(getUniversalResponseWarning(result, programs.length));
     } else if (isPartialResponse(result)) {
       warningMessages.push(depthOne
         ? "Partial Depth-1 result returned. Some detail pages used fallback listing data, but usable rows were extracted."
@@ -2618,6 +3178,23 @@ function buildUcasStatusSequence() {
   }));
 }
 
+function formatUniversalDiagnosticsSummary(diagnostics = {}) {
+  const parts = [
+    diagnostics.seedPageType ? `Seed page type: ${diagnostics.seedPageType}` : "",
+    diagnostics.phase ? `Phase: ${humanizeUniversalPhase(diagnostics.phase, diagnostics.jobStatus, diagnostics)}` : "",
+    diagnostics.listingPagesFetched !== undefined ? `Listing pages fetched: ${diagnostics.listingPagesFetched}` : "",
+    diagnostics.detailPagesQueued !== undefined ? `Detail pages queued: ${diagnostics.detailPagesQueued}` : "",
+    diagnostics.detailPagesFetched !== undefined ? `Detail pages fetched: ${diagnostics.detailPagesFetched}` : "",
+    diagnostics.detailPagesSucceeded !== undefined ? `Detail pages succeeded: ${diagnostics.detailPagesSucceeded}` : "",
+    diagnostics.detailPagesFailed !== undefined ? `Detail pages failed: ${diagnostics.detailPagesFailed}` : "",
+    diagnostics.enrichmentQueueLength !== undefined ? `Enrichment queue: ${diagnostics.enrichmentQueueLength}` : "",
+    diagnostics.enrichmentPagesFetched !== undefined ? `Enrichment pages fetched: ${diagnostics.enrichmentPagesFetched}` : "",
+    diagnostics.completionStatus ? `Completion: ${diagnostics.completionStatus}` : "",
+  ];
+
+  return parts.filter(Boolean).join(" | ");
+}
+
 function isIncompleteUcasResponse(result) {
   if (!isUcasResponse(result)) return false;
   const diagnostics = getUcasDiagnostics(result);
@@ -2638,6 +3215,45 @@ function isIncompleteUcasResponse(result) {
   );
 }
 
+function isIncompleteUniversalResponse(result) {
+  if (isUcasResponse(result)) return false;
+  const diagnostics = getUniversalDiagnostics(result);
+  if (!hasUniversalDiagnostics(diagnostics)) return false;
+
+  return Boolean(
+    diagnostics.partial === true ||
+    diagnostics.universalComplete === false ||
+    (
+      diagnostics.completionStatus &&
+      !/^(completed|complete|done|success|succeeded)$/i.test(String(diagnostics.completionStatus))
+    ) ||
+    Number(diagnostics.detailPagesFailed || 0) > 0 ||
+    (
+      Array.isArray(diagnostics.completionReasons)
+        ? diagnostics.completionReasons.length > 0
+        : Boolean(diagnostics.completionReasons)
+    )
+  );
+}
+
+function getUniversalResponseWarning(result, rowsLength = 0) {
+  const diagnostics = getUniversalDiagnostics(result);
+  const warning = getUniversalPartialWarning(diagnostics, rowsLength);
+  if (warning) return warning;
+
+  if (diagnostics.detailPagesFailed) {
+    return "Extraction is partial - some detail pages failed or were skipped.";
+  }
+
+  if (diagnostics.universalComplete === false) {
+    return rowsLength
+      ? "Some key fields may be missing. Review diagnostics before using this as final data."
+      : "Expected row count is unknown, so completeness could not be fully verified.";
+  }
+
+  return "Extraction is partial - review diagnostics before using this as final data.";
+}
+
 function getUcasSecurityWarning(hasRows) {
   const rowMessage = hasRows
     ? "Rows already extracted are shown below, but this run should not be treated as complete."
@@ -2652,6 +3268,7 @@ function getUcasSecurityWarning(hasRows) {
 
 function isPartialResponse(result) {
   const diagnostics = getUcasDiagnostics(result);
+  const universalDiagnostics = getUniversalDiagnostics(result);
   const partial =
     result?.frontendDiagnostics?.partial ??
     result?.diagnostics?.partial ??
@@ -2659,6 +3276,8 @@ function isPartialResponse(result) {
   return Boolean(
     partial ||
     diagnostics.ucasComplete === false ||
+    universalDiagnostics.partial === true ||
+    universalDiagnostics.universalComplete === false ||
     hasUcasSecurityPage(result)
   );
 }
@@ -2666,8 +3285,10 @@ function isPartialResponse(result) {
 function getResponseDiagnostics(data) {
   const frontend = data?.frontendDiagnostics || {};
   const diagnostics = data?.diagnostics || {};
+  const universalDiagnostics = getUniversalDiagnostics(data);
   return {
     ...getUcasDiagnostics(data),
+    ...universalDiagnostics,
     extractDetailsRequested:
       frontend.extractDetailsRequested ?? diagnostics.extractDetailsRequested,
     normalExtractionAttempted:
@@ -2684,14 +3305,14 @@ function getResponseDiagnostics(data) {
       frontend.finalOutputSource ?? diagnostics.finalOutputSource,
     candidateCount: frontend.candidateCount ?? diagnostics.programmeCandidateCount,
     finalCandidateCount: frontend.finalCandidateCount ?? diagnostics.finalCandidateCount,
-    detailsAttempted: frontend.detailsAttempted ?? diagnostics.detailPagesAttempted,
-    detailsSucceeded: frontend.detailsSucceeded ?? diagnostics.detailPagesSucceeded,
-    detailsFailed: frontend.detailsFailed ?? diagnostics.detailPagesFailed,
-    detailsSkipped: frontend.detailsSkipped ?? diagnostics.detailPagesSkipped,
+    detailsAttempted: frontend.detailsAttempted ?? diagnostics.detailPagesAttempted ?? universalDiagnostics.detailPagesFetched,
+    detailsSucceeded: frontend.detailsSucceeded ?? diagnostics.detailPagesSucceeded ?? universalDiagnostics.detailPagesSucceeded,
+    detailsFailed: frontend.detailsFailed ?? diagnostics.detailPagesFailed ?? universalDiagnostics.detailPagesFailed,
+    detailsSkipped: frontend.detailsSkipped ?? diagnostics.detailPagesSkipped ?? universalDiagnostics.detailPagesSkipped,
     shortCoursesRejected: frontend.shortCoursesRejected ?? diagnostics.nonAwardShortCourseRejectedCount,
     depthOneStatus: frontend.depthOneStatus ?? diagnostics.depthOneStatus,
     depthOneReady: frontend.depthOneReady ?? diagnostics.depthOneReady,
-    partial: frontend.partial ?? data?.partial,
+    partial: frontend.partial ?? diagnostics.partial ?? data?.partial ?? universalDiagnostics.partial,
     completionWasAffectedByRuntime:
       frontend.completionWasAffectedByRuntime ?? diagnostics.completionWasAffectedByRuntime,
   };
@@ -3116,6 +3737,7 @@ function renderDebugPanel(forceVisible = false) {
   const markdown = debugState.finalExtractionMarkdown || debugState.markdown || "";
   const diagnostics = be.diagnostics || {};
   const isUcasDiagnostics = Boolean(diagnostics.ucasMode ?? diagnostics.ucasDetected);
+  const isUniversalDiagnostics = !isUcasDiagnostics && hasUniversalDiagnostics(diagnostics);
   const diagnosticRows = [
     ["Backend patch", be.backendPatch],
     ["Backend route", be.routeName],
@@ -3136,54 +3758,86 @@ function renderDebugPanel(forceVisible = false) {
     ["Depth-1 status", diagnostics.depthOneStatus || "not_requested"],
     ["Partial result", formatYesNo(diagnostics.partial)],
     ["Runtime affected completion", formatYesNo(diagnostics.completionWasAffectedByRuntime)],
-    ["UCAS mode", formatYesNo(diagnostics.ucasMode ?? diagnostics.ucasDetected)],
-    ["UCAS complete", formatYesNo(diagnostics.ucasComplete)],
-    ["UCAS job id", diagnostics.jobId],
-    ["UCAS job status", diagnostics.jobStatus],
-    ["UCAS raw job status", diagnostics.rawJobStatus],
-    ["UCAS phase", diagnostics.phase],
-    ["Static only", formatYesNo(diagnostics.staticOnly)],
+    ["UCAS mode", isUcasDiagnostics ? formatYesNo(diagnostics.ucasMode ?? diagnostics.ucasDetected) : ""],
+    ["UCAS complete", isUcasDiagnostics ? formatYesNo(diagnostics.ucasComplete) : ""],
+    ["UCAS job id", isUcasDiagnostics ? diagnostics.jobId : ""],
+    ["UCAS job status", isUcasDiagnostics ? diagnostics.jobStatus : ""],
+    ["UCAS raw job status", isUcasDiagnostics ? diagnostics.rawJobStatus : ""],
+    ["UCAS phase", isUcasDiagnostics ? diagnostics.phase : ""],
+    ["Static only", isUcasDiagnostics ? formatYesNo(diagnostics.staticOnly) : ""],
     ["LLM used", isUcasDiagnostics ? "" : formatYesNo(diagnostics.llmUsed)],
     ["Playwright used", isUcasDiagnostics ? "" : formatYesNo(diagnostics.playwrightUsed)],
-    ["Expected UCAS results", diagnostics.expectedResultCount],
-    ["UCAS rows collected", diagnostics.rowsCollected],
-    ["UCAS rows output", diagnostics.rowsOutput],
-    ["Unique UCAS courses", diagnostics.uniqueCourses],
-    ["Listing pages fetched", diagnostics.listingPagesFetched],
-    ["Listing pages expected", diagnostics.listingPagesExpected],
-    ["Current listing page", diagnostics.currentListingPage],
-    ["Next listing URL", diagnostics.nextListingUrl],
-    ["Pagination stopped reason", diagnostics.paginationStoppedReason],
-    ["Fee pages completed", diagnostics.feePagesCompleted],
-    ["Fee pages remaining", diagnostics.feePagesRemaining],
-    ["Fee details attempted", diagnostics.feeDetailsAttempted],
-    ["Fee queue length", diagnostics.feeQueueLength],
-    ["Fee completed count", diagnostics.feeCompletedCount],
-    ["UCAS waiting", formatYesNo(diagnostics.waiting)],
-    ["UCAS rate limited", formatYesNo(diagnostics.rateLimited)],
-    ["Rate-limit attempts", diagnostics.rateLimitAttemptCount],
-    ["Next retry", diagnostics.nextRetryAt],
-    ["Estimated remaining", diagnostics.estimatedRemainingTime],
-    ["Fees found", diagnostics.feeFoundCount],
-    ["No fee provided", diagnostics.noFeeProvidedCount],
-    ["Fee option required", diagnostics.optionRequiredCount],
-    ["Fee fetch failed", diagnostics.feeFetchFailedCount],
-    ["Fee parse failed", diagnostics.feeParseFailedCount],
-    ["Security page detected", formatYesNo(diagnostics.securityPageDetected)],
-    ["Blocked page count", diagnostics.blockedPageCount],
-    ["Blocked page type", diagnostics.blockedPageType],
+    ["Expected UCAS results", isUcasDiagnostics ? diagnostics.expectedResultCount : ""],
+    ["UCAS rows collected", isUcasDiagnostics ? diagnostics.rowsCollected : ""],
+    ["UCAS rows output", isUcasDiagnostics ? diagnostics.rowsOutput : ""],
+    ["Unique UCAS courses", isUcasDiagnostics ? diagnostics.uniqueCourses : ""],
+    ["Listing pages expected", isUcasDiagnostics ? diagnostics.listingPagesExpected : ""],
+    ["Current listing page", isUcasDiagnostics ? diagnostics.currentListingPage : ""],
+    ["Next listing URL", isUcasDiagnostics ? diagnostics.nextListingUrl : ""],
+    ["Pagination stopped reason", isUcasDiagnostics ? diagnostics.paginationStoppedReason : ""],
+    ["Fee pages completed", isUcasDiagnostics ? diagnostics.feePagesCompleted : ""],
+    ["Fee pages remaining", isUcasDiagnostics ? diagnostics.feePagesRemaining : ""],
+    ["Fee details attempted", isUcasDiagnostics ? diagnostics.feeDetailsAttempted : ""],
+    ["Fee queue length", isUcasDiagnostics ? diagnostics.feeQueueLength : ""],
+    ["Fee completed count", isUcasDiagnostics ? diagnostics.feeCompletedCount : ""],
+    ["UCAS waiting", isUcasDiagnostics ? formatYesNo(diagnostics.waiting) : ""],
+    ["UCAS rate limited", isUcasDiagnostics ? formatYesNo(diagnostics.rateLimited) : ""],
+    ["Rate-limit attempts", isUcasDiagnostics ? diagnostics.rateLimitAttemptCount : ""],
+    ["Next retry", isUcasDiagnostics ? diagnostics.nextRetryAt : ""],
+    ["Estimated remaining", isUcasDiagnostics ? diagnostics.estimatedRemainingTime : ""],
+    ["Fees found", isUcasDiagnostics ? diagnostics.feeFoundCount : ""],
+    ["No fee provided", isUcasDiagnostics ? diagnostics.noFeeProvidedCount : ""],
+    ["Fee option required", isUcasDiagnostics ? diagnostics.optionRequiredCount : ""],
+    ["Fee fetch failed", isUcasDiagnostics ? diagnostics.feeFetchFailedCount : ""],
+    ["Fee parse failed", isUcasDiagnostics ? diagnostics.feeParseFailedCount : ""],
+    ["Security page detected", isUcasDiagnostics ? formatYesNo(diagnostics.securityPageDetected) : ""],
+    ["Blocked page count", isUcasDiagnostics ? diagnostics.blockedPageCount : ""],
+    ["Blocked page type", isUcasDiagnostics ? diagnostics.blockedPageType : ""],
     [
       "Blocked page URLs",
-      Array.isArray(diagnostics.blockedPageUrls)
+      isUcasDiagnostics && Array.isArray(diagnostics.blockedPageUrls)
         ? diagnostics.blockedPageUrls.join(", ")
-        : diagnostics.blockedPageUrls,
+        : isUcasDiagnostics
+          ? diagnostics.blockedPageUrls
+          : "",
     ],
+    ["Universal job id", isUniversalDiagnostics ? diagnostics.jobId : ""],
+    ["Universal job status", isUniversalDiagnostics ? diagnostics.jobStatus : ""],
+    ["Universal raw job status", isUniversalDiagnostics ? diagnostics.rawJobStatus : ""],
+    ["Universal phase", isUniversalDiagnostics ? diagnostics.phase : ""],
+    ["Source type", isUniversalDiagnostics ? diagnostics.sourceType : ""],
+    ["Seed page type", isUniversalDiagnostics ? diagnostics.seedPageType : ""],
+    ["Direct detail mode", isUniversalDiagnostics ? formatYesNo(diagnostics.directDetailMode) : ""],
+    ["Listing queue length", isUniversalDiagnostics ? diagnostics.listingQueueLength : ""],
+    ["Pagination queue length", isUniversalDiagnostics ? diagnostics.paginationQueueLength : ""],
+    ["Detail queue length", isUniversalDiagnostics ? diagnostics.detailQueueLength : ""],
+    ["Enrichment queue length", isUniversalDiagnostics ? diagnostics.enrichmentQueueLength : ""],
+    ["Listing pages fetched", isUniversalDiagnostics ? diagnostics.listingPagesFetched : ""],
+    ["Detail pages queued", isUniversalDiagnostics ? diagnostics.detailPagesQueued : ""],
+    ["Detail pages fetched", isUniversalDiagnostics ? diagnostics.detailPagesFetched : ""],
+    ["Detail pages succeeded", isUniversalDiagnostics ? diagnostics.detailPagesSucceeded : ""],
+    ["Detail pages failed", isUniversalDiagnostics ? diagnostics.detailPagesFailed : ""],
+    ["Enrichment pages fetched", isUniversalDiagnostics ? diagnostics.enrichmentPagesFetched : ""],
+    ["Completion status", isUniversalDiagnostics ? diagnostics.completionStatus : ""],
+    ["Universal complete", isUniversalDiagnostics ? formatYesNo(diagnostics.universalComplete) : ""],
+    ["Partial reasons", isUniversalDiagnostics ? diagnostics.completionReasons : ""],
+    ["Current URL", isUniversalDiagnostics ? diagnostics.currentUrl : ""],
+    ["Next URL", isUniversalDiagnostics ? diagnostics.nextUrl : ""],
+    ["Current delay", isUniversalDiagnostics ? formatSeconds(diagnostics.currentDelaySeconds) : ""],
+    ["Estimated remaining", isUniversalDiagnostics ? formatSeconds(diagnostics.estimatedRemainingSeconds) : ""],
+    ["Completed URLs", isUniversalDiagnostics ? diagnostics.completedUrls : ""],
+    ["Failed URLs", isUniversalDiagnostics ? diagnostics.failedUrls : ""],
+    ["Skipped URLs", isUniversalDiagnostics ? diagnostics.skippedUrls : ""],
+    ["Row rejection reasons", isUniversalDiagnostics ? diagnostics.rowRejectionReasons : ""],
+    ["Page-type classifier reasons", isUniversalDiagnostics ? diagnostics.pageTypeClassifierReasons : ""],
+    ["Field coverage", isUniversalDiagnostics ? diagnostics.fieldCoverage : ""],
+    ["Provenance summary", isUniversalDiagnostics ? diagnostics.provenanceSummary : ""],
     ["Appended seed URLs", appendedSeedUrls.length > 1 ? appendedSeedUrls.length : ""],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
 
   debugStatsEl.innerHTML = [
     ...diagnosticRows.map(([label, value]) =>
-      `<div><span class="debug-k">${esc(label)}</span> ${esc(value)}</div>`),
+      `<div><span class="debug-k">${esc(label)}</span> ${esc(formatDiagnosticValue(value))}</div>`),
     `<div><span class="debug-k">Final extraction markdown</span> ${markdown.length.toLocaleString()} chars</div>`,
     `<div><span class="debug-k">Backend page type</span> ${esc(be.pageType || "unknown")}</div>`,
     `<div><span class="debug-k">Backend preparser ran</span> ${be.preparserRan ? "yes" : "no"}</div>`,
@@ -3231,6 +3885,10 @@ function formatYesNo(value) {
 
 function formatDiagnosticValue(value) {
   if (typeof value === "boolean") return value ? "ready" : "not ready";
+  if (Array.isArray(value)) {
+    return value.map(item => typeof item === "object" ? JSON.stringify(item) : String(item)).join(", ");
+  }
+  if (value && typeof value === "object") return JSON.stringify(value);
   return value ?? "";
 }
 
@@ -3915,6 +4573,12 @@ function normalizeCatalogRows(rows) {
     location: row?.location || "",
     language: row?.language || "",
     modeOfStudy: row?.modeOfStudy || row?.mode_of_study || "",
+    sourceUrl: row?.sourceUrl || row?.source_url || "",
+    listingUrl: row?.listingUrl || row?.listing_url || "",
+    detailUrl: row?.detailUrl || row?.detail_url || "",
+    enrichmentUrls: row?.enrichmentUrls || row?.enrichment_urls || "",
+    fieldSources: row?.fieldSources || row?.field_sources || "",
+    discoveredFrom: row?.discoveredFrom || row?.discovered_from || "",
   }));
 }
 
@@ -4375,6 +5039,22 @@ function openModal(p) {
     return `<div class="modal-row"><span class="modal-key">${key}</span><span class="modal-val">${display}</span></div>`;
   };
 
+  const provenanceValue = value => {
+    if (Array.isArray(value) || (value && typeof value === "object")) return JSON.stringify(value);
+    return value;
+  };
+  const provenanceRows = [
+    ["Source URL", p.source_url],
+    ["Listing URL", p.listing_url],
+    ["Detail URL", p.detail_url],
+    ["Enrichment URLs", provenanceValue(p.enrichment_urls)],
+    ["Field Sources", provenanceValue(p.field_sources)],
+    ["Discovered From", p.discovered_from],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const provenanceBlock = provenanceRows.length
+    ? `${section("Provenance")}${provenanceRows.map(([key, value]) => row(key, value)).join("")}`
+    : "";
+
   // Description gets its own styled block - rendered as HTML since it may contain formatting
   const descCopyButton = copyButton("Copy program description", p.description, { isHtml: true });
   const descBlock = p.description
@@ -4439,6 +5119,8 @@ function openModal(p) {
     ${row("Personal Statement",        p.personal_statement)}
     ${row("Portfolio",                 p.portfolio)}
     ${row("Interview",                 p.interview)}
+
+    ${provenanceBlock}
   `;
 
   bindFieldCopyButtons(modalBody);
@@ -4473,6 +5155,17 @@ function bindSortableHeaders() {
 
 bindSortableHeaders();
 
+function getCsvCellValue(row, key) {
+  let value = row?.[key];
+  if (key === "description") {
+    return String(value ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  if (Array.isArray(value) || (value && typeof value === "object")) {
+    return JSON.stringify(value);
+  }
+  return String(value ?? "");
+}
+
 //Export CSV
 exportBtn.addEventListener("click", () => {
   if (!allPrograms.length) return;
@@ -4484,9 +5177,7 @@ exportBtn.addEventListener("click", () => {
     columns.map(([label]) => `"${String(label).replace(/"/g, '""')}"`).join(","),
     ...allPrograms.map(p =>
       columns.map(([, key]) => {
-        // Strip HTML tags from description for CSV readability
-        let val = String(p[key] ?? "");
-        if (key === "description") val = val.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        const val = getCsvCellValue(p, key);
         return `"${val.replace(/"/g, '""')}"`;
       }).join(",")
     ),
