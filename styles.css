@@ -611,7 +611,7 @@ main {
     border-color 260ms ease;
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .extractor-view,
@@ -1252,19 +1252,19 @@ table {
 
 #programTable[data-mode="audit"] { min-width: 1180px; }
 #programTable[data-mode="catalog"] { min-width: 1040px; }
-#programTable[data-mode="ucas"] { min-width: 1160px; }
+#programTable[data-mode="ucas"] { min-width: 1180px; }
 
-#programTable[data-mode="ucas"] th:nth-child(1) { width: 19%; }
-#programTable[data-mode="ucas"] th:nth-child(2) { width: 11%; }
-#programTable[data-mode="ucas"] th:nth-child(3) { width: 15%; }
-#programTable[data-mode="ucas"] th:nth-child(4) { width: 7%; }
-#programTable[data-mode="ucas"] th:nth-child(5) { width: 9%; }
-#programTable[data-mode="ucas"] th:nth-child(6) { width: 11%; }
-#programTable[data-mode="ucas"] th:nth-child(7) { width: 8%; }
-#programTable[data-mode="ucas"] th:nth-child(8) { width: 8%; }
-#programTable[data-mode="ucas"] th:nth-child(9) { width: 8%; }
-#programTable[data-mode="ucas"] th:nth-child(10) { width: 10%; }
-#programTable[data-mode="ucas"] th:nth-child(11) { width: 13%; }
+#programTable[data-mode="ucas"] th:nth-child(1) { width: 18%; }
+#programTable[data-mode="ucas"] th:nth-child(2) { width: 9%; }
+#programTable[data-mode="ucas"] th:nth-child(3) { width: 13%; }
+#programTable[data-mode="ucas"] th:nth-child(4) { width: 6%; }
+#programTable[data-mode="ucas"] th:nth-child(5) { width: 8%; }
+#programTable[data-mode="ucas"] th:nth-child(6) { width: 9%; }
+#programTable[data-mode="ucas"] th:nth-child(7) { width: 7%; }
+#programTable[data-mode="ucas"] th:nth-child(8) { width: 7%; }
+#programTable[data-mode="ucas"] th:nth-child(9) { width: 7%; }
+#programTable[data-mode="ucas"] th:nth-child(10) { width: 8%; }
+#programTable[data-mode="ucas"] th:nth-child(11) { width: 8%; }
 thead {
   background: rgba(255,255,255,0.025);
   position: sticky; top: 0; z-index: 2;
@@ -1275,7 +1275,7 @@ th {
   text-align: left;
   font-size: .59rem;
   font-weight: 600;
-  letter-spacing: .11em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--muted);
   padding: .68rem .86rem;
@@ -1284,6 +1284,7 @@ th {
   overflow-wrap: normal;
   word-break: normal;
   hyphens: none;
+  line-height: 1.35;
   cursor: pointer;
   user-select: none;
   transition: color .16s ease;
@@ -1302,9 +1303,11 @@ th.sorted-asc .sort-icon,
 th.sorted-desc .sort-icon { opacity: 1; color: var(--green); }
 
 #programTable[data-mode="ucas"] th {
-  min-width: 5.4rem;
+  min-width: 6rem;
+  white-space: normal;
   overflow-wrap: normal;
   word-break: keep-all;
+  line-break: normal;
 }
 
 #programTable[data-mode="ucas"] th:nth-child(4),
@@ -1328,7 +1331,7 @@ td {
   color: var(--text);
   min-width: 0;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: normal;
 }
 td.col-num {
@@ -1348,7 +1351,7 @@ td.name-cell {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: break-word;
 }
 .table-cell-clamp {
@@ -1360,7 +1363,20 @@ td.name-cell {
 .provider-cell,
 .fee-cell,
 .fee-status-cell,
+.study-mode-cell,
+.duration-cell,
+.start-date-cell,
+.location-cell,
 .catalog-url-cell {
+  word-break: break-word;
+}
+
+#programTable[data-mode="ucas"] td {
+  line-height: 1.36;
+}
+
+#programTable[data-mode="ucas"] .catalog-url-cell,
+#programTable[data-mode="ucas"] .catalog-url-cell .url-link {
   overflow-wrap: anywhere;
   word-break: break-word;
 }

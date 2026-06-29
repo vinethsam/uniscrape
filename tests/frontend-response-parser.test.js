@@ -54,6 +54,7 @@ test("detects only supported UCAS course and search URLs", () => {
   assert.equal(isUcasUrl("https://www.ucas.com/explore/search/providers"), false);
   assert.equal(isUcasUrl("https://www.ucas.com/explore/search/courses-not-real"), false);
   assert.equal(isUcasUrl("https://www.ucas.com.evil.test/explore/search/courses"), false);
+  assert.equal(isUcasUrl("https://subdomain.ucas.com/explore/search/courses"), false);
   assert.equal(isUcasUrl("https://example.com/search?q=ucas"), false);
   assert.equal(isUcasUrl("not a URL"), false);
 });
@@ -74,7 +75,7 @@ test("normalises UCAS rows while preserving zero and N/A points", () => {
       program_name: "Zero tariff",
       provider_name: "Example University",
       ucas_tariff_raw: 0,
-      preferred_fee_raw: "£9,535",
+      preferred_fee_raw: "GBP 9,535",
     },
     {
       title: "No tariff",
@@ -85,8 +86,35 @@ test("normalises UCAS rows while preserving zero and N/A points", () => {
   ]);
 
   assert.equal(rows[0].ucasPoints, 0);
+  assert.equal(rows[0].fee, "GBP 9,535");
   assert.equal(rows[1].ucasPoints, "N/A");
   assert.equal(rows[1].feeStatus, "no_fee_provided");
+});
+
+test("normalises UCAS table field fallbacks", () => {
+  const [row] = normalizeUcasRows([
+    {
+      title: "Fine Art",
+      award: "BA (Hons)",
+      institution: "Example School",
+      home_fee_raw: "Home fee pending",
+      preferred_fee_type: "home",
+      study_mode: "Full-time",
+      start_date_or_month: "September 2027",
+      campus_location: "Main campus",
+      course_url: "https://www.ucas.com/explore/courses/ABC123",
+    },
+  ]);
+
+  assert.equal(row.programName, "Fine Art");
+  assert.equal(row.qualification, "BA (Hons)");
+  assert.equal(row.universityProvider, "Example School");
+  assert.equal(row.fee, "Home fee pending");
+  assert.equal(row.feeStatus, "home");
+  assert.equal(row.studyMode, "Full-time");
+  assert.equal(row.startDate, "September 2027");
+  assert.equal(row.location, "Main campus");
+  assert.equal(row.courseUrl, "https://www.ucas.com/explore/courses/ABC123");
 });
 
 test("falls back to UCAS point ranges only when raw points are missing", () => {
@@ -121,7 +149,7 @@ test("normalises mixed UCAS retry diagnostics", () => {
   const diagnostics = getUcasDiagnostics({
     diagnostics: {
       ucasMode: true,
-      jobStatus: "rate_limited",
+      status: "rate_limited",
       jobPhase: "waiting",
       ucasRateLimited: true,
       next_retry_at: "2026-06-25T12:05:00Z",
@@ -135,6 +163,10 @@ test("normalises mixed UCAS retry diagnostics", () => {
   });
 
   assert.equal(diagnostics.ucasRateLimited, true);
+  assert.equal(diagnostics.rateLimited, true);
+  assert.equal(diagnostics.jobStatus, "rate_limited");
+  assert.equal(diagnostics.phase, "waiting");
+  assert.equal(diagnostics.nextRetryAt, "2026-06-25T12:05:00Z");
   assert.equal(diagnostics.next_retry_at, "2026-06-25T12:05:00Z");
   assert.equal(diagnostics.rateLimitAttemptCount, 2);
   assert.equal(diagnostics.currentListingPage, 2);

@@ -94,6 +94,9 @@
       "job_id",
       "jobStatus",
       "job_status",
+      "status",
+      "jobPhase",
+      "job_phase",
       "phase",
       "rowsCollected",
       "rows_collected",
@@ -118,13 +121,15 @@
       "nextListingUrl",
       "next_listing_url",
       "waiting",
+      "isWaiting",
+      "is_waiting",
       "nextRetryAt",
       "next_retry_at",
       "estimatedRemainingTime",
       "estimated_remaining_time",
     ];
 
-    return keys.reduce((diagnostics, key) => {
+    const diagnostics = keys.reduce((diagnosticValues, key) => {
       const values = responseValues(result, key);
       let value = values[0];
 
@@ -138,9 +143,42 @@
         value = [...new Set(values.flatMap(item => Array.isArray(item) ? item : [item]).filter(Boolean))];
       }
 
-      if (value !== undefined) diagnostics[key] = value;
-      return diagnostics;
+      if (value !== undefined) diagnosticValues[key] = value;
+      return diagnosticValues;
     }, {});
+
+    const aliasGroups = [
+      ["jobId", ["jobId", "job_id", "id"]],
+      ["jobStatus", ["jobStatus", "job_status", "status", "state"]],
+      ["phase", ["jobPhase", "job_phase", "phase", "currentPhase", "current_phase"]],
+      ["expectedResultCount", ["expectedResultCount", "expected_result_count", "expectedCount", "expected_count", "totalCount", "total_count", "total"]],
+      ["rowsCollected", ["rowsCollected", "rows_collected", "rowsOutput", "rows_output", "resultCount", "result_count"]],
+      ["listingPagesFetched", ["listingPagesFetched", "listing_pages_fetched"]],
+      ["currentListingPage", ["currentListingPage", "current_listing_page", "listingPage", "listing_page", "page"]],
+      ["nextListingUrl", ["nextListingUrl", "next_listing_url", "currentListingUrl", "current_listing_url", "targetUrl", "target_url"]],
+      ["feeQueueLength", ["feeQueueLength", "fee_queue_length"]],
+      ["feeDetailsAttempted", ["feeDetailsAttempted", "fee_details_attempted"]],
+      ["feeCompletedCount", ["feeCompletedCount", "fee_completed_count", "feePagesCompleted", "fee_pages_completed"]],
+      ["rateLimitAttemptCount", ["rateLimitAttemptCount", "rate_limit_attempt_count", "retryAttemptCount", "retry_attempt_count"]],
+      ["nextRetryAt", ["nextRetryAt", "next_retry_at"]],
+      ["estimatedRemainingTime", ["estimatedRemainingTime", "estimated_remaining_time", "eta", "etaSeconds", "eta_seconds"]],
+    ];
+
+    aliasGroups.forEach(([canonicalKey, aliases]) => {
+      const value = firstResponseValue(result, aliases);
+      if (value !== undefined && value !== null) diagnostics[canonicalKey] = value;
+    });
+
+    if (["waiting", "isWaiting", "is_waiting"].some(key => responseValues(result, key).some(isTrue))) {
+      diagnostics.waiting = true;
+    }
+
+    if (["rateLimited", "rate_limited", "ucasRateLimited", "ucas_rate_limited"].some(key => responseValues(result, key).some(isTrue))) {
+      diagnostics.rateLimited = true;
+      diagnostics.ucasRateLimited = true;
+    }
+
+    return diagnostics;
   }
 
   function hasUcasSecurityPage(result) {
